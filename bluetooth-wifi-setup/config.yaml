@@ -1,7 +1,7 @@
 # Copyright 2025 Ted Lanham
 # Licensed under the MIT License
 name: Bluetooth WiFi Setup
-version: 0.5.37
+version: 0.0.1
 slug: bluetooth-wifi-setup
 description: Configure WiFi via Bluetooth
 url: https://github.com/Backroads4Me/ha-addons
@@ -34,4 +34,4 @@ schema:
   keep_alive: bool
   encryption_enabled: bool
   password: str?
-image: ghcr.io/backroads4me/{arch}-bluetooth-wifi-setup
+image: ghcr.io/backroads4me/{arch}-bluetooth-wifi-setup-alpha

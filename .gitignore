@@ -39,7 +39,7 @@ GEMINI.md
 .docker/
 
 # Logs
-
+*.log
 
 # Testing
 .pytest_cache/
