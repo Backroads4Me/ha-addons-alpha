@@ -10,8 +10,4 @@ RUN apk add --no-cache git curl jq bash
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
-# Copy Node-RED setup script and make it executable
-COPY setup-node-red.sh /setup-node-red.sh
-RUN chmod +x /setup-node-red.sh
-
 CMD ["/run.sh"]

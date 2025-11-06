@@ -1,8 +1,8 @@
 # Home Assistant add-on: RV Link
 name: "RV Link"
-version: "0.1.0"
+version: "0.2.0"
 slug: "rv-link"
-description: "Installs Node-RED, Mosquitto, CAN MQTT Bridge, and Lovelace custom cards automatically."
+description: "Deploys and updates Node-RED automation project for RV monitoring and control."
 url: "https://github.com/Backroads4Me/ha-addons-alpha"
 maintainer: "Ted Lanham <tedlanham@gmail.com>"
 arch:
@@ -14,12 +14,12 @@ boot: manual
 init: false
 hassio_api: true
 hassio_role: manager
-homeassistant_api: true
+homeassistant_api: false
 map:
-  - "config:rw"
-  - "share:rw"
-privileged:
-  - NET_ADMIN
-options: {}
-schema: {}
-image: ghcr.io/backroads4me/{arch}-rv-link-alpha
+  - share:rw
+  - addon_configs:rw
+options:
+  force_update: true
+schema:
+  force_update: bool?
+image: ghcr.io/backroads4me/{arch}-rv-link{SUFFIX}
