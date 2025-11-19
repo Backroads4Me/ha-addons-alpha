@@ -1,73 +1,58 @@
-# RV Link - Node-RED Project Deployer
+# RV Link - Complete RV Control System
 
-Automatically deploys and updates a Node-RED automation project for RV monitoring and control systems.
+**One Add-on to Rule Them All.**
 
-## What is RV Link?
+RV Link is the all-in-one solution for integrating your RV's CAN bus with Home Assistant. It acts as a **System Orchestrator**, automatically setting up the entire environment for you.
 
-RV Link is a Home Assistant add-on that manages your Node-RED automation project. Instead of manually configuring Node-RED and copying flows, RV Link:
+## ✨ Features
 
-- ✅ Enables Node-RED project mode automatically
-- ✅ Deploys a pre-built Node-RED project from GitHub
-- ✅ Updates your project when you update the add-on
-- ✅ Handles project versioning seamlessly
+-   **🔌 Hardware Bridge**: Connects directly to your USB-CAN adapter (e.g., CandleLight, Toucan) and bridges RV-C traffic to MQTT.
+-   **🧠 System Orchestrator**: Automatically installs and configures the official **Mosquitto Broker** and **Node-RED**.
+-   **📦 Project Bundler**: Comes with the `rv-link-node-red` automation project pre-bundled. No Git required!
+-   **🛡️ Safety First**: Respects your existing Node-RED flows and asks permission before taking over.
 
-**The add-on version matches the project version** - when you see an update notification, you know there's a new version of the automation project available!
-
-## Prerequisites
-
-Before installing RV Link, you must install these add-ons:
-
-### Required
-- **Node-RED** - The automation engine (install from Community Add-ons)
-
-### Recommended for RV Monitoring
-- **Mosquitto Broker** - MQTT message bus (install from Official add-ons)
-- **CAN MQTT Bridge** - For CAN bus integration (install from Backroads4Me repository)
-
-## Installation
+## 🚀 Installation
 
 ### 1. Add the Repository
 
-Settings → Add-ons → Add-on Store → ⋮ → Repositories
+[![Open your Home Assistant instance and show the add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FBackroads4Me%2Fha-addons)
 
-Add: `https://github.com/Backroads4Me/ha-addons`
+Or manually add: `https://github.com/Backroads4Me/ha-addons`
 
-### 2. Install Prerequisites
+### 2. Install RV Link
 
-Install Node-RED (and optionally Mosquitto and CAN MQTT Bridge) from the Add-on Store.
+Find **RV Link** in the store and click **Install**.
 
-### 3. Install RV Link
+### 3. Start & Enjoy
 
-Find "RV Link" in the add-on store and install it.
+Click **Start**. The add-on will:
+1.  Check for **Mosquitto**. If missing, it installs it.
+2.  Check for **Node-RED**. If missing, it installs it.
+3.  **Deploy** the RV Link automation flows.
+4.  **Start** the CAN-to-MQTT bridge.
 
-### 4. Start RV Link
+## ⚠️ Important Notes
 
-Click "Start" - the add-on will automatically:
-- Configure Node-RED for project mode
-- Clone the RV Link project
-- Restart Node-RED
+### Mosquitto Requirement
+RV Link **strictly requires** the official Home Assistant **Mosquitto broker** add-on.
+-   If you are using another broker (like EMQX), installation will **fail** to prevent conflicts.
+-   Please switch to the official Mosquitto add-on to use RV Link.
 
-### 5. Access Node-RED
+### Existing Node-RED Users
+If you already have Node-RED installed:
+-   RV Link will **PAUSE** and wait for your permission.
+-   It will **NOT** overwrite your existing flows automatically.
+-   To proceed, you must go to **Configuration** and enable `confirm_nodered_takeover`.
 
-Settings → Add-ons → Node-RED → Open Web UI
+## 🔧 Configuration
 
-Select the "rv-link" project if prompted.
+| Option | Default | Description |
+| :--- | :--- | :--- |
+| `can_interface` | `can0` | The network interface of your USB-CAN adapter. |
+| `can_bitrate` | `250000` | Bitrate of your RV-C bus (usually 250k). |
+| `confirm_nodered_takeover` | `false` | **Safety Switch**: Set to `true` to allow RV Link to replace existing Node-RED flows. |
 
-## Updating
+## 📚 Support
 
-When a new version of RV Link is released:
-
-1. Update the add-on from the Add-on Store (you'll see an update notification)
-2. Start the add-on again
-3. Your Node-RED project will be updated automatically
-
-That's it! The add-on version equals the project version.
-
-## Configuration
-
-By default, RV Link always updates to the latest version, overwriting any local changes. See [DOCS.md](DOCS.md) for the `force_update` option to preserve local modifications.
-
-## Support
-
-- Issues: https://github.com/Backroads4Me/ha-addons/issues
-- Project Repository: https://github.com/Backroads4Me/rv-link-node-red
+-   **Issues**: [GitHub Issues](https://github.com/Backroads4Me/ha-addons/issues)
+-   **Project**: [RV Link Node-RED](https://github.com/Backroads4Me/rv-link-node-red)

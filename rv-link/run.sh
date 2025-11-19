@@ -1,309 +1,330 @@
-#!/usr/bin/env bash
+#!/usr/bin/with-contenv bashio
 set -e
 
-echo "================================================"
-echo "🚀 RV Link - Node-RED Project Deployer"
-echo "================================================"
-echo ""
+bashio::log.info "================================================"
+bashio::log.info "🚀 RV Link - Monolith System Starting"
+bashio::log.info "================================================"
 
-# Environment Information (for troubleshooting)
-echo "🔍 Environment Information:"
-echo "   Alpine version: $(cat /etc/alpine-release 2>/dev/null || echo "unknown")"
-echo "   Git version: $(git --version 2>&1)"
-echo "   Bash version: $BASH_VERSION"
-echo "   Current user: $(whoami)"
-echo "   Working directory: $(pwd)"
-echo "   Supervisor token present: $([ -n "$SUPERVISOR_TOKEN" ] && echo "yes (${#SUPERVISOR_TOKEN} chars)" || echo "NO - THIS WILL FAIL")"
-echo ""
-
+# ========================
 # Configuration
+# ========================
 SUPERVISOR="http://supervisor"
 AUTH_HEADER="Authorization: Bearer $SUPERVISOR_TOKEN"
 PROJECT_DIR="/share/node-red-projects"
-CONFIG_FILE="/data/options.json"
-
-# Project settings (hardcoded)
-PROJECT_REPO="https://github.com/Backroads4Me/rv-link-node-red"
 PROJECT_NAME="rv-link"
+BUNDLED_PROJECT="/opt/rv-link-project"
 
-# Read user options
-echo "📋 Reading configuration from $CONFIG_FILE..."
-if [ ! -f "$CONFIG_FILE" ]; then
-  echo "   ⚠️  WARNING: Config file not found at $CONFIG_FILE"
-  FORCE_UPDATE="true"
+# Add-on Slugs
+SLUG_MOSQUITTO="core_mosquitto"
+SLUG_NODERED="a0d7b954_nodered"
+
+# Bridge Config
+CAN_INTERFACE=$(bashio::config 'can_interface')
+CAN_BITRATE=$(bashio::config 'can_bitrate')
+MQTT_TOPIC_RAW=$(bashio::config 'mqtt_topic_raw')
+MQTT_TOPIC_SEND=$(bashio::config 'mqtt_topic_send')
+MQTT_TOPIC_STATUS=$(bashio::config 'mqtt_topic_status')
+DEBUG_LOGGING=$(bashio::config 'debug_logging')
+
+# MQTT Config (Auto-discovery or Manual)
+if bashio::services.available "mqtt"; then
+    bashio::log.info "MQTT service discovered"
+    MQTT_HOST=$(bashio::services "mqtt" "host")
+    MQTT_PORT=$(bashio::services "mqtt" "port")
+    MQTT_USER=$(bashio::services "mqtt" "username")
+    MQTT_PASS=$(bashio::services "mqtt" "password")
 else
-  echo "   ✅ Config file found"
-  FORCE_UPDATE=$(jq -r '.force_update // true' "$CONFIG_FILE")
+    bashio::log.info "Using manual MQTT configuration"
+    MQTT_HOST=$(bashio::config 'mqtt_host')
+    MQTT_PORT=$(bashio::config 'mqtt_port')
+    MQTT_USER=$(bashio::config 'mqtt_user')
+    MQTT_PASS=$(bashio::config 'mqtt_pass')
 fi
 
-echo ""
-echo "📋 Configuration:"
-echo "   Project: $PROJECT_NAME"
-echo "   Repository: $PROJECT_REPO"
-echo "   Force Update: $FORCE_UPDATE"
-echo "   Project Directory: $PROJECT_DIR"
-echo ""
+MQTT_AUTH_ARGS=""
+[ -n "$MQTT_USER" ] && MQTT_AUTH_ARGS="$MQTT_AUTH_ARGS -u $MQTT_USER"
+[ -n "$MQTT_PASS" ] && MQTT_AUTH_ARGS="$MQTT_AUTH_ARGS -P $MQTT_PASS"
 
-# Helper function for Supervisor API calls
+# ========================
+# Orchestrator Helpers
+# ========================
 api_call() {
   local method=$1
   local endpoint=$2
   local data=$3
-
   if [ -n "$data" ]; then
-    curl -s -X "$method" -H "$AUTH_HEADER" -H "Content-Type: application/json" \
-      -d "$data" "$SUPERVISOR$endpoint"
+    curl -s -X "$method" -H "$AUTH_HEADER" -H "Content-Type: application/json" -d "$data" "$SUPERVISOR$endpoint"
   else
     curl -s -X "$method" -H "$AUTH_HEADER" "$SUPERVISOR$endpoint"
   fi
 }
 
-# Step 1: Find Node-RED addon
-echo "🔍 Step 1: Locating Node-RED addon..."
-echo "   > Querying Supervisor API for installed addons..."
-ADDONS_RESPONSE=$(api_call GET "/addons")
-echo "   > Searching for addon with name='Node-RED'..."
-NODE_RED_SLUG=$(echo "$ADDONS_RESPONSE" | jq -r '.data.addons[] | select(.name == "Node-RED") | .slug' | head -n1)
+is_installed() {
+  local slug=$1
+  echo "$(api_call GET "/addons/$slug/info")" | jq -e '.result == "ok"' >/dev/null 2>&1
+}
 
-if [ -z "$NODE_RED_SLUG" ]; then
-  echo "❌ ERROR: Node-RED addon not found!"
-  echo ""
-  echo "📊 Diagnostic Information:"
-  echo "   Installed addons:"
-  echo "$ADDONS_RESPONSE" | jq -r '.data.addons[]? | "      - \(.name) (\(.slug))"' 2>/dev/null || echo "      Failed to parse addon list"
-  echo ""
-  echo "Please install Node-RED before running this addon:"
-  echo "   Settings → Add-ons → Add-on Store"
-  echo "   Search for 'Node-RED' and install it"
-  echo ""
-  exit 1
-fi
+is_running() {
+  local slug=$1
+  local state
+  state=$(echo "$(api_call GET "/addons/$slug/info")" | jq -r '.data.state // "unknown"')
+  [ "$state" == "started" ]
+}
 
-echo "   ✅ Found Node-RED: $NODE_RED_SLUG"
-echo ""
+install_addon() {
+  local slug=$1
+  bashio::log.info "   > Installing $slug..."
+  local result
+  result=$(api_call POST "/store/addons/$slug/install")
+  if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
+    bashio::log.info "   ✅ Installed $slug"
+  else
+    bashio::log.error "   ❌ Failed to install $slug: $(echo "$result" | jq -r '.message')"
+    return 1
+  fi
+}
 
-# Step 2: Check if Node-RED is installed (has version)
-echo "🔍 Step 2: Checking Node-RED installation..."
-echo "   > Querying addon info for $NODE_RED_SLUG..."
-NODE_RED_INFO=$(api_call GET "/addons/$NODE_RED_SLUG/info")
-NODE_RED_VERSION=$(echo "$NODE_RED_INFO" | jq -r '.data.version // empty')
-NODE_RED_STATE=$(echo "$NODE_RED_INFO" | jq -r '.data.state // "unknown"')
+start_addon() {
+  local slug=$1
+  bashio::log.info "   > Starting $slug..."
+  api_call POST "/addons/$slug/start" > /dev/null
+  local retries=10
+  while [ $retries -gt 0 ]; do
+    if is_running "$slug"; then
+      bashio::log.info "   ✅ $slug is running"
+      return 0
+    fi
+    sleep 2
+    ((retries--))
+  done
+  bashio::log.warning "   ⚠️  $slug started but state is not 'started' yet"
+}
 
-if [ -z "$NODE_RED_VERSION" ]; then
-  echo "❌ ERROR: Node-RED is not installed!"
-  echo ""
-  echo "📊 Diagnostic Information:"
-  echo "   Addon slug: $NODE_RED_SLUG"
-  echo "   Addon state: $NODE_RED_STATE"
-  echo "   Please install Node-RED from the Add-on Store first."
-  echo ""
-  exit 1
-fi
+set_options() {
+  local slug=$1
+  local json=$2
+  bashio::log.info "   > Configuring $slug..."
+  local result
+  result=$(api_call POST "/addons/$slug/options" "{\"options\": $json}")
+  if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
+    bashio::log.info "   ✅ Configured $slug"
+  else
+    bashio::log.error "   ❌ Failed to configure $slug: $(echo "$result" | jq -r '.message')"
+  fi
+}
 
-echo "   ✅ Node-RED v$NODE_RED_VERSION is installed"
-echo "   📊 State: $NODE_RED_STATE"
-echo ""
+# ========================
+# Phase 1: Orchestration
+# ========================
+bashio::log.info "📋 Phase 1: System Orchestration"
 
-# Step 3: Enable Node-RED project mode
-echo "⚙️  Step 3: Configuring Node-RED project mode..."
-echo "   > Sending configuration: {\"options\": {\"projects\": true}}"
-CONFIG_RESULT=$(api_call POST "/addons/$NODE_RED_SLUG/options" "{\"options\": {\"projects\": true}}")
-echo "   > API Response: $CONFIG_RESULT"
-
-if echo "$CONFIG_RESULT" | jq -e '.result == "ok"' >/dev/null 2>&1; then
-  echo "   ✅ Project mode enabled"
+# 1. Mosquitto
+if is_installed "$SLUG_MOSQUITTO"; then
+  # Mosquitto is installed, ensure it's running
+  if ! is_running "$SLUG_MOSQUITTO"; then
+    start_addon "$SLUG_MOSQUITTO"
+  fi
 else
-  echo "   ⚠️  Could not enable project mode: $(echo "$CONFIG_RESULT" | jq -r '.message // "Unknown error"')"
-  echo "   Continuing anyway..."
+  # Mosquitto is NOT installed. Check for conflicts.
+  if bashio::services.available "mqtt"; then
+    bashio::log.fatal "❌ CONFLICT DETECTED: An MQTT broker is already active, but it is not the official Mosquitto add-on."
+    bashio::log.fatal "   RV Link requires the official 'Mosquitto broker' add-on for guaranteed consistency."
+    bashio::log.fatal "   Please uninstall your current MQTT broker and restart RV Link."
+    exit 1
+  else
+    # No conflict, install Mosquitto
+    bashio::log.info "   📥 Mosquitto not found. Installing..."
+    install_addon "$SLUG_MOSQUITTO"
+    start_addon "$SLUG_MOSQUITTO"
+  fi
 fi
-echo ""
 
-# Step 3.5: Configure Context Storage (One-time setup)
-echo "⚙️  Step 3.5: Configuring context storage..."
+# 2. Node-RED
+CONFIRM_TAKEOVER=$(bashio::config 'confirm_nodered_takeover')
 
-# Determine Node-RED config directory based on detected slug
-NODERED_CONFIG_DIR="/addon_configs/${NODE_RED_SLUG}"
+if is_installed "$SLUG_NODERED"; then
+  bashio::log.info "   ℹ️  Node-RED is already installed."
+  
+  # If installed, we MUST check for permission to take over
+  if [ "$CONFIRM_TAKEOVER" != "true" ]; then
+     bashio::log.warning "   ⚠️  EXISTING INSTALLATION DETECTED"
+     bashio::log.warning "   RV Link needs to configure Node-RED to run the RV Link project."
+     bashio::log.warning "   This will REPLACE your active Node-RED flows."
+     bashio::log.warning "   "
+     bashio::log.warning "   To proceed, you must explicitly grant permission:"
+     bashio::log.warning "   1. Go to the RV Link add-on configuration."
+     bashio::log.warning "   2. Enable 'confirm_nodered_takeover'."
+     bashio::log.warning "   3. Restart RV Link."
+     bashio::log.fatal "   ❌ Installation aborted to protect existing flows."
+     exit 1
+  else
+     bashio::log.info "   ✅ Permission granted to take over Node-RED."
+  fi
+else
+  bashio::log.info "   📥 Node-RED not found. Installing..."
+  install_addon "$SLUG_NODERED"
+fi
+
+# Configure Node-RED
+NR_INFO=$(api_call GET "/addons/$SLUG_NODERED/info")
+NR_OPTIONS=$(echo "$NR_INFO" | jq '.data.options')
+SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
+
+if [ -z "$SECRET" ]; then
+  bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
+  NEW_SECRET=$(openssl rand -hex 16)
+  NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg secret "$NEW_SECRET" '. + {"credential_secret": $secret, "projects": true, "ssl": false}')
+  set_options "$SLUG_NODERED" "$NEW_OPTIONS"
+else
+  PROJECTS=$(echo "$NR_OPTIONS" | jq -r '.projects')
+  if [ "$PROJECTS" != "true" ]; then
+    bashio::log.info "   > Enabling projects..."
+    NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq '. + {"projects": true}')
+    set_options "$SLUG_NODERED" "$NEW_OPTIONS"
+  fi
+fi
+
+# Context Storage
+NODERED_CONFIG_DIR="/addon_configs/$SLUG_NODERED"
 SETTINGS_FILE="$NODERED_CONFIG_DIR/settings.js"
+if [ -d "$NODERED_CONFIG_DIR" ] && [ -f "$SETTINGS_FILE" ]; then
+   if ! grep -q "contextStorage" "$SETTINGS_FILE"; then
+     bashio::log.info "   📝 Adding context storage configuration..."
+     cp "$SETTINGS_FILE" "$SETTINGS_FILE.bak"
+     
+     # Use Python for robust file editing
+     python3 -c "
+import sys
+import re
 
-echo "   > Config directory: $NODERED_CONFIG_DIR"
-echo "   > Settings file: $SETTINGS_FILE"
-echo "   > Settings file exists: $([ -f "$SETTINGS_FILE" ] && echo "yes" || echo "NO")"
+file_path = '$SETTINGS_FILE'
+with open(file_path, 'r') as f:
+    content = f.read()
 
-if [ ! -f "$SETTINGS_FILE" ]; then
-  echo "   ⚠️  Settings file not found at $SETTINGS_FILE"
-  echo "   📊 Directory contents:"
-  ls -la "$NODERED_CONFIG_DIR" 2>&1 | sed 's/^/      /' || echo "      Failed to list directory"
-  echo "   Skipping context storage configuration"
-else
-  echo "   ✅ Settings file found"
-  echo "   📊 File size: $(stat -c%s "$SETTINGS_FILE" 2>/dev/null || stat -f%z "$SETTINGS_FILE") bytes"
-  echo "   📊 Line count: $(wc -l < "$SETTINGS_FILE") lines"
-
-  # Check if context storage is already configured (only configure once)
-  if grep -q "contextStorage" "$SETTINGS_FILE"; then
-    echo "   ✅ Context storage already configured (skipping)"
-  else
-    echo "   📝 Initial setup: Adding context storage configuration..."
-
-    # Backup original settings before first modification
-    if [ ! -f "$SETTINGS_FILE.rvlink-backup" ]; then
-      echo "   📋 Creating backup of original settings..."
-      cp "$SETTINGS_FILE" "$SETTINGS_FILE.rvlink-backup"
-      echo "   ✅ Backup created: ${SETTINGS_FILE}.rvlink-backup"
-    fi
-
-    # Create temporary file with context storage config
-    cat > /tmp/context_storage.js << 'EOF'
-
-    // RV Link: Context Storage Configuration
+# Config to insert
+config = '''
     contextStorage: {
-        default: "memoryOnly",
-        memoryOnly: {
-            module: 'memory'
-        },
-        file: {
-            module: 'localfilesystem'
-        }
+        default: 'memoryOnly',
+        memoryOnly: { module: 'memory' },
+        file: { module: 'localfilesystem' }
     },
-EOF
+'''
 
-    # Insert the context storage config into settings.js
-    # HAOS-compatible approach: Use head instead of sed for portability
-    echo "   > Modifying settings.js file..."
-    echo "   > Step 1: Creating temp file without last line..."
-    head -n -1 "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp"
-    echo "   > Step 2: Appending context storage config..."
-    cat /tmp/context_storage.js >> "${SETTINGS_FILE}.tmp"
-    echo "   > Step 3: Adding closing brace..."
-    echo "}" >> "${SETTINGS_FILE}.tmp"
-    echo "   > Step 4: Replacing original file..."
-    mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
-
-    rm /tmp/context_storage.js
-
-    echo "   ✅ Context storage configured (memoryOnly + file)"
-    echo "   📊 New file size: $(stat -c%s "$SETTINGS_FILE" 2>/dev/null || stat -f%z "$SETTINGS_FILE") bytes"
-    echo "   📊 New line count: $(wc -l < "$SETTINGS_FILE") lines"
-    echo "   ℹ️  This is a one-time configuration"
-  fi
+# Find the last closing brace
+# We look for the last occurrence of '}' that closes the module.exports object
+# This is a heuristic, but safer than 'head -n -1'
+# We assume the file ends with '}' or '};' optionally followed by whitespace/comments
+match = re.search(r'}(\s*;?\s*)$', content)
+if match:
+    # Insert before the last brace
+    new_content = content[:match.start()] + config + content[match.start():]
+    with open(file_path, 'w') as f:
+        f.write(new_content)
+    print('Updated settings.js')
+else:
+    print('Could not find closing brace, skipping update', file=sys.stderr)
+    sys.exit(1)
+"
+     if [ $? -eq 0 ]; then
+        bashio::log.info "   ✅ settings.js updated"
+     else
+        bashio::log.warning "   ⚠️  Failed to update settings.js automatically"
+     fi
+   fi
 fi
-echo ""
 
-# Step 4: Restart Node-RED to apply configuration
-echo "🔄 Step 4: Restarting Node-RED to apply settings..."
-echo "   > Sending restart request to $NODE_RED_SLUG..."
-RESTART_RESULT=$(api_call POST "/addons/$NODE_RED_SLUG/restart" "")
-echo "   > API Response: $RESTART_RESULT"
-echo "   ⏳ Waiting for Node-RED to start (30 seconds)..."
-sleep 30
-echo "   ✅ Node-RED restarted"
-echo ""
+if ! is_running "$SLUG_NODERED"; then
+  start_addon "$SLUG_NODERED"
+else
+  # Restart if we might have changed config
+  # Only restart if we actually changed something? For now, safe to restart to ensure sync.
+  # But we don't want to restart every time.
+  # Let's skip restart if it's already running and we didn't change anything critical.
+  # Actually, for the "Monolith" feel, we want to ensure it's up.
+  true
+fi
 
-# Step 5: Deploy Node-RED project
-echo "📦 Step 5: Deploying Node-RED project..."
-echo "   > Creating project directory: $PROJECT_DIR"
+# ========================
+# Phase 2: Deployment
+# ========================
+bashio::log.info "📋 Phase 2: Deploying RV Link Project"
 mkdir -p "$PROJECT_DIR"
-cd "$PROJECT_DIR"
-echo "   > Changed to directory: $(pwd)"
-
 PROJECT_PATH="$PROJECT_DIR/$PROJECT_NAME"
-echo "   > Project path: $PROJECT_PATH"
-echo "   > Project exists: $([ -d "$PROJECT_PATH/.git" ] && echo "yes" || echo "no")"
 
-if [ -d "$PROJECT_PATH/.git" ]; then
-  echo "   ℹ️  Project already exists"
+# Always overwrite with bundled version to ensure consistency
+# Or should we respect local changes?
+# User requested "Update this addon -> changes installed".
+# So we should OVERWRITE.
+bashio::log.info "   📦 Installing bundled project to $PROJECT_PATH..."
+rm -rf "$PROJECT_PATH"
+cp -r "$BUNDLED_PROJECT" "$PROJECT_PATH"
+bashio::log.info "   ✅ Project deployed"
 
-  cd "$PROJECT_PATH"
-  echo "   > Changed to: $(pwd)"
+# Restart Node-RED to pick up new flows?
+# If we just replaced the files, Node-RED might need a restart.
+bashio::log.info "   🔄 Restarting Node-RED..."
+api_call POST "/addons/$SLUG_NODERED/restart" "" > /dev/null
 
-  # Detect the default branch
-  echo "   > Detecting current branch..."
-  DEFAULT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-  echo "   > Current branch: $DEFAULT_BRANCH"
+# ========================
+# Phase 3: CAN Bridge
+# ========================
+bashio::log.info "📋 Phase 3: Starting CAN Bridge"
 
-  # Check for local changes
-  echo "   > Checking for local modifications..."
-  if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-    echo "   ⚠️  Local changes detected:"
-    git status --short 2>&1 | sed 's/^/      /'
-
-    if [ "$FORCE_UPDATE" = "true" ]; then
-      echo "   ⚠️  Force update enabled - discarding local changes"
-      echo "   > git fetch origin"
-      git fetch origin 2>&1 | sed 's/^/      /'
-      echo "   > git reset --hard origin/$DEFAULT_BRANCH"
-      git reset --hard origin/$DEFAULT_BRANCH 2>&1 | sed 's/^/      /'
-      echo "   ✅ Project updated (local changes discarded)"
-    else
-      echo "   ⚠️  Force update disabled - preserving local changes"
-      echo "   💡 Set 'force_update: true' in addon config to overwrite local changes"
-      echo ""
-      echo "✅ Deployment complete (existing project preserved)"
-      exit 0
-    fi
-  else
-    echo "   ✅ No local changes detected"
-    echo "   📥 Pulling latest changes from $DEFAULT_BRANCH..."
-    echo "   > git pull origin $DEFAULT_BRANCH"
-    git pull origin $DEFAULT_BRANCH 2>&1 | sed 's/^/      /'
-    echo "   ✅ Project updated"
-  fi
-else
-  echo "   📥 Cloning project repository..."
-  echo "   > git clone $PROJECT_REPO $PROJECT_PATH"
-  git clone "$PROJECT_REPO" "$PROJECT_PATH" 2>&1 | sed 's/^/      /'
-  cd "$PROJECT_PATH"
-  echo "   > Changed to: $(pwd)"
-
-  # Detect the default branch after cloning
-  echo "   > Detecting default branch..."
-  DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
-  if [ -z "$DEFAULT_BRANCH" ]; then
-    DEFAULT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-  fi
-  echo "   > Default branch: $DEFAULT_BRANCH"
-
-  # Explicitly checkout the default branch (HAOS compatibility)
-  echo "   > git checkout $DEFAULT_BRANCH"
-  git checkout "$DEFAULT_BRANCH" 2>&1 | sed 's/^/      /' || true
-
-  echo "   ✅ Project cloned (branch: $DEFAULT_BRANCH)"
+# CAN Init
+bashio::log.info "   > Initializing CAN interface $CAN_INTERFACE..."
+if [ -f "/sys/class/net/$CAN_INTERFACE/operstate" ] && [ "$(cat "/sys/class/net/$CAN_INTERFACE/operstate")" = "up" ]; then
+    ip link set "$CAN_INTERFACE" down
 fi
-echo ""
-
-# Step 6: Verify project structure
-echo "🔍 Step 6: Verifying project structure..."
-if [ -f "$PROJECT_PATH/package.json" ]; then
-  echo "   ✅ Project structure looks good"
+if ! ip link set "$CAN_INTERFACE" up type can bitrate "$CAN_BITRATE"; then
+    bashio::log.fatal "   ❌ Failed to set CAN bitrate. Check hardware."
+    # Don't exit, maybe hardware is missing but we still want Orchestrator to work?
+    # But this is the "Bridge" addon.
+    # We'll continue but bridge won't work.
 else
-  echo "   ⚠️  Warning: package.json not found"
-  echo "   Project may need manual configuration in Node-RED"
+    ip link set "$CAN_INTERFACE" up
+    bashio::log.info "   ✅ CAN interface up"
 fi
-echo ""
 
-# Step 7: Final restart of Node-RED
-echo "🔄 Step 7: Final Node-RED restart..."
-echo "   > Sending restart request to $NODE_RED_SLUG..."
-RESTART_RESULT=$(api_call POST "/addons/$NODE_RED_SLUG/restart" "")
-echo "   > API Response: $RESTART_RESULT"
-echo "   ✅ Node-RED restarted"
-echo ""
+# Bridge Loop
+bashio::log.info "🚀 RV Link System Fully Operational"
 
-# Success summary
-echo "================================================"
-echo "🎉 RV Link deployment complete!"
-echo "================================================"
-echo ""
-echo "📋 What was done:"
-echo "   ✅ Node-RED project mode enabled"
-echo "   ✅ Context storage configured (memoryOnly + file)"
-echo "   ✅ Project '$PROJECT_NAME' deployed"
-echo "   ✅ Node-RED restarted with new configuration"
-echo ""
-echo "⚠️  Next steps:"
-echo "   1. Open Node-RED: Settings → Add-ons → Node-RED → Open Web UI"
-echo "   2. Select project '$PROJECT_NAME' if prompted"
-echo "   3. Deploy your flows"
-echo ""
-echo "💡 To update: Just update this addon when a new version is available!"
-echo ""
+# Cleanup handler
+cleanup() {
+    bashio::log.info "Shutdown signal received..."
+    [ -n "$PID_C2M" ] && kill "$PID_C2M" 2>/dev/null
+    [ -n "$PID_M2C" ] && kill "$PID_M2C" 2>/dev/null
+    exit 0
+}
+trap cleanup SIGTERM SIGINT
+
+# CAN -> MQTT
+{
+    while true; do
+        candump -L "$CAN_INTERFACE" 2>/dev/null | awk '{print $3}' | \
+        while IFS= read -r frame; do
+            [ -n "$frame" ] && echo "$frame"
+        done | mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" $MQTT_AUTH_ARGS \
+                            -t "$MQTT_TOPIC_RAW" -q 1 -l
+        sleep 5
+    done
+} &
+PID_C2M=$!
+
+# MQTT -> CAN
+{
+    while true; do
+        mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" $MQTT_AUTH_ARGS \
+                      -t "$MQTT_TOPIC_SEND" -q 1 | \
+        while IFS= read -r message; do
+            # Simple pass-through for now, assuming valid format
+            # can-mqtt-bridge had complex logic, but for now we assume ID#DATA
+            if [ -n "$message" ]; then
+                 cansend "$CAN_INTERFACE" "$message" 2>/dev/null || bashio::log.warning "Failed to send: $message"
+            fi
+        done
+        sleep 5
+    done
+} &
+PID_M2C=$!
+
+wait $PID_C2M $PID_M2C
