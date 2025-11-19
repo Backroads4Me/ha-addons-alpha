@@ -128,7 +128,18 @@ class NetworkManager:
             mLOG.log(f"Connection failed: {error}", level=mLOG.INFO)
             return False
 
-        mLOG.log(f'Successfully connected to {network.ssid}')
+        # Verify connection was actually established
+        interface_info = self.supervisor_api.get_interface_info()
+        if interface_info and 'wifi' in interface_info:
+            connected_ssid = interface_info.get('wifi', {}).get('ssid', '')
+            if connected_ssid == network.ssid:
+                mLOG.log(f'Successfully connected to {network.ssid}')
+            else:
+                mLOG.log(f"Connection verification failed: expected {network.ssid}, got {connected_ssid}", level=mLOG.INFO)
+                return False
+        else:
+            mLOG.log("Could not verify connection status", level=mLOG.INFO)
+            # Continue anyway - connection may have succeeded even if we can't verify
 
         # Update internal state - add to known networks if new
         if is_new:

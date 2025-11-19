@@ -36,8 +36,9 @@ fi
 
 # Check for WiFi adapter
 if [ ! -d /sys/class/net/wlan0 ]; then
-    bashio::log.warning "WiFi adapter wlan0 not found!"
-    bashio::log.warning "The addon may not function correctly without a WiFi adapter."
+    bashio::log.error "WiFi adapter wlan0 not found!"
+    bashio::log.error "This addon requires a WiFi adapter to function."
+    exit 1
 fi
 
 # Check if Supervisor API is accessible
@@ -87,14 +88,8 @@ bashio::log.info "Starting Bluetooth server."
 bashio::log.info "Bluetooth initialized. 42 processes ready."
 bashio::log.info "Searching for the connection..."
 
-# Test Python import before exec to catch import errors
-# Note: main.py uses relative imports from app package, so we need to set PYTHONPATH
+# Set Python path for app package imports
 export PYTHONPATH="/"
-python3 -c "import sys; sys.path.insert(0, '/'); from app.utils.logger import mLOG; from app.ble.manager import BLEManager" 2>&1
-if [ $? -ne 0 ]; then
-    bashio::log.error "Python modules failed to import! Check for syntax or import errors."
-    exit 1
-fi
 
 exec python3 -u /main.py \
     --timeout "${TIMEOUT}" \

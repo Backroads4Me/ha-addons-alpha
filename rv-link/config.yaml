@@ -1,6 +1,6 @@
 # Home Assistant add-on: RV Link
 name: "RV Link"
-version: "0.4.4"
+version: "0.4.5"
 slug: "rv-link"
 description: "The complete RV Link solution: CAN Bridge + Node-RED Orchestrator."
 url: "https://github.com/Backroads4Me/ha-addons"
@@ -9,7 +9,7 @@ arch:
   - aarch64
   - amd64
   - armv7
-startup: services
+startup: application
 boot: manual
 init: false
 hassio_api: true
@@ -27,7 +27,6 @@ map:
   - share:rw
   - addon_configs:rw
 options:
-  force_update: true
   can_interface: "can0"
   can_bitrate: "250000"
   mqtt_host: "core-mosquitto"
@@ -40,7 +39,6 @@ options:
   debug_logging: false
   confirm_nodered_takeover: false
 schema:
-  force_update: bool?
   can_interface: str
   can_bitrate: list(125000|250000|500000|1000000)
   mqtt_host: str

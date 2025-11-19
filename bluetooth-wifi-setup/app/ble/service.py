@@ -40,6 +40,7 @@ class Notifications:
         self.unlockingMsg = b''
         self.messageCounter = 1
         self.wifi_prefix = "wifi"
+        self._lock = threading.Lock()  # Thread safety for notification queue
         #contains the current encoded unlocking messgae to test against 
         #   to detect if pi is unlocking after being locked - following user request
         #see notifications in wifiCharasteristic for handling.
@@ -74,7 +75,8 @@ class Notifications:
             self.unlockingMsg = msg_to_send
         else:
             self.unlockingMsg = b''
-        self.notifications.append(msg_to_send)
+        with self._lock:
+            self.notifications.append(msg_to_send)
 
     def make_chunks(self,msg,to_send):
         # returns a list of chunks , each a string
@@ -107,7 +109,8 @@ class Notifications:
             #not multipart - send normal notification
             mLOG.log(f"sending simple notification: {target}:{chunked_json_list[0]}")
             encrypted_msg_to_send = self.cryptomgr.encrypt(SEPARATOR + f"{target}:{chunked_json_list[0]}")
-            self.notifications.append(encrypted_msg_to_send)
+            with self._lock:
+                self.notifications.append(encrypted_msg_to_send)
             return
         
         #chunked_json_list = ["this is a test meassage ","in two parts."]
@@ -127,7 +130,8 @@ class Notifications:
                 else:
                     mLOG.log(f"about to encrypt: {chunk_to_send}")
                     encrypted = self.cryptomgr.encrypt(chunk_to_send)
-                self.notifications.append(encrypted)
+                with self._lock:
+                    self.notifications.append(encrypted)
             except Exception as ex:
                 mLOG.log(f"Error encrypting json notification: {ex}")
 
@@ -547,8 +551,12 @@ class WifiDataCharacteristic(Characteristic):
             therefore after msg is sent whit encryption, only then is crypto disabled on the pi.
         '''
         # Pace notifications: send at most one chunk per tick to avoid flooding the central and triggering disconnects.
-        if self.notifying and len(self.service.notifications.notifications) > 0:
-            thisNotification_bytes = self.service.notifications.notifications.pop(0)
+        thisNotification_bytes = None
+        with self.service.notifications._lock:
+            if self.notifying and len(self.service.notifications.notifications) > 0:
+                thisNotification_bytes = self.service.notifications.notifications.pop(0)
+        
+        if thisNotification_bytes is not None:
             # notification is in bytes, already has prefix separator and may be encrypted
             needToUnlock = thisNotification_bytes == self.service.notifications.unlockingMsg
             value = [dbus.Byte(b) for b in thisNotification_bytes]

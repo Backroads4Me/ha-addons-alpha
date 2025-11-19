@@ -95,8 +95,10 @@ class SupervisorAPI:
                     continue
 
                 # Signal strength: Supervisor gives dBm (-100 to 0), convert to 0-5 scale
+                # Typical range: -90 (poor) to -30 (excellent)
                 signal_dbm = ap.get('signal', -100)
-                signal_strength = max(0, min(5, int((signal_dbm + 100) / 20)))
+                # Convert -100 to -25 dBm range to 0-5 scale
+                signal_strength = max(0, min(5, int((signal_dbm + 100) / 15)))
 
                 # Check if network is encrypted (mode != 'open')
                 auth_mode = ap.get('mode', 'wpa-psk').lower()
@@ -181,14 +183,14 @@ class SupervisorAPI:
 
     def disconnect_interface(self):
         """
-        Disconnect from current WiFi network
+        Disconnect from current WiFi network without disabling the interface
         Returns: (success: bool, error_msg: str or None)
         """
-        # To disconnect, we set the interface to disabled or manual with no config
+        # To disconnect without disabling interface, clear WiFi config but keep interface enabled
         config = {
-            "enabled": False,
             "ipv4": {"method": "disabled"},
-            "ipv6": {"method": "disabled"}
+            "ipv6": {"method": "disabled"},
+            "wifi": {}  # Empty WiFi config disconnects from network
         }
 
         success, data, error = self._make_request(

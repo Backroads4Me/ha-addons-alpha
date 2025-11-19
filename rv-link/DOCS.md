@@ -1,29 +1,29 @@
 # RV Link Documentation
 
-Complete documentation for the RV Link Node-RED project deployer add-on.
+Complete documentation for the RV Link all-in-one RV control system add-on.
 
 ## Overview
 
-RV Link is a specialized Home Assistant add-on that automates the deployment and updating of a Node-RED project designed for RV monitoring and control systems.
+RV Link is a monolithic Home Assistant add-on that provides a complete RV monitoring and control solution. It combines a CAN bus bridge with automated Node-RED project deployment and system orchestration.
 
 ### Key Features
 
-- **Automated Project Deployment**: Clones your Node-RED project from GitHub
-- **Seamless Updates**: Update the add-on to update your project
-- **Project Mode Management**: Automatically configures Node-RED for project mode
-- **Version Synchronization**: Add-on version = Project version
-- **Local Change Handling**: Configurable behavior for local modifications
+- **Complete System Orchestrator**: Automatically installs and configures Mosquitto and Node-RED
+- **CAN-MQTT Bridge**: Connects your RV's CAN bus directly to MQTT
+- **Bundled Automation Project**: Pre-packaged Node-RED flows for RV control
+- **Safety Protection**: Asks permission before modifying existing Node-RED installations
+- **Graceful Degradation**: Works as orchestrator-only if CAN hardware is unavailable
 
 ## How It Works
 
 When you start the RV Link add-on:
 
-1. **Locates Node-RED**: Finds your installed Node-RED add-on
-2. **Enables Project Mode**: Configures Node-RED to use projects
-3. **Deploys Project**: Clones or updates the project from GitHub
-4. **Restarts Node-RED**: Applies all changes
+1. **System Orchestration**: Installs/starts Mosquitto broker and Node-RED
+2. **Project Deployment**: Deploys the bundled RV Link Node-RED project
+3. **CAN Bridge Setup**: Initializes CAN interface and starts bidirectional bridge
+4. **Continuous Operation**: Runs as a long-lived service monitoring CAN traffic
 
-The add-on runs once and exits. Run it again to update your project.
+The add-on remains running to maintain the CAN-MQTT bridge connection.
 
 ## Automatic Configuration
 
@@ -48,96 +48,124 @@ context.set("myValue", 123, "file");
 
 ## Prerequisites
 
-### Required
+### Hardware
 
-- **Node-RED add-on** must be installed (from Community Add-ons)
-  - Settings → Add-ons → Add-on Store
-  - Search for "Node-RED" and install
+- **CAN Bus Interface**: USB-CAN adapter (e.g., CandleLight, Toucan, etc.)
+  - Optional: Addon works without CAN hardware in orchestrator-only mode
 
-### Recommended
+### Software
 
-For a complete RV monitoring setup:
-
-- **Mosquitto Broker** (Official add-ons) - MQTT message bus
-- **CAN MQTT Bridge** (Backroads4Me add-ons) - CAN bus integration
+RV Link automatically installs these if missing:
+- **Mosquitto Broker** (Official add-on) - MQTT message bus
+- **Node-RED** (Community add-on) - Flow-based automation
 
 ## Configuration Options
 
 Access configuration: Settings → Add-ons → RV Link → Configuration
 
-### `force_update` (optional)
+### `can_interface`
 
-**Type**: Boolean
-**Default**: `true`
+**Type**: String
+**Default**: `can0`
 
-Controls how local changes to the Node-RED project are handled:
-
-- `true` (default): Always update, discarding any local modifications
-- `false`: Preserve local changes, skip update if modifications exist
+The network interface name of your USB-CAN adapter.
 
 **Example**:
 ```yaml
-force_update: false
+can_interface: can0
 ```
 
+### `can_bitrate`
+
+**Type**: Integer
+**Default**: `250000`
+
+The bitrate of your RV-C bus. Most RVs use 250kbps.
+
+**Options**: `125000`, `250000`, `500000`, `1000000`
+
+**Example**:
+```yaml
+can_bitrate: 250000
+```
+
+### `confirm_nodered_takeover`
+
+**Type**: Boolean
+**Default**: `false`
+
+Safety switch to prevent accidental overwriting of existing Node-RED flows.
+
 **When to use**:
-- Keep default (`true`) to always receive the latest project updates
-- Set to `false` if you make custom modifications to flows that you want to preserve
+- Set to `true` if you have Node-RED already installed and want RV Link to take control
+- Leave as `false` for new installations
+
+**Example**:
+```yaml
+confirm_nodered_takeover: true
+```
+
+### MQTT Settings
+
+Advanced users can override auto-discovered MQTT settings:
+
+- `mqtt_host` - MQTT broker hostname (default: auto-discovered)
+- `mqtt_port` - MQTT port (default: 1883)
+- `mqtt_user` - MQTT username (optional)
+- `mqtt_pass` - MQTT password (optional)
+- `mqtt_topic_raw` - Topic for raw CAN frames (default: `can/raw`)
+- `mqtt_topic_send` - Topic for sending CAN frames (default: `can/send`)
+- `mqtt_topic_status` - Topic for status messages (default: `can/status`)
 
 ## Installation Guide
 
-### Step 1: Install Node-RED
-
-1. Settings → Add-ons → Add-on Store
-2. Search for "Node-RED"
-3. Click "Node-RED" by Community Add-ons
-4. Click "Install"
-5. Wait for installation to complete
-6. **Start Node-RED** and configure it (set credentials, etc.)
-
-### Step 2: Install Optional Add-ons
-
-For full RV monitoring functionality:
-
-**Mosquitto Broker**:
-1. Settings → Add-ons → Add-on Store
-2. Official add-ons → Mosquitto broker
-3. Install and start
-
-**CAN MQTT Bridge**:
-1. Settings → Add-ons → Add-on Store → ⋮ → Repositories
-2. Add: `https://github.com/Backroads4Me/ha-addons`
-3. Find "CAN MQTT Bridge" and install
-
-### Step 3: Install RV Link
+### Step 1: Add Repository
 
 1. Settings → Add-ons → Add-on Store → ⋮ → Repositories
 2. Add: `https://github.com/Backroads4Me/ha-addons`
-3. Find "RV Link" in the store
-4. Click "Install"
 
-### Step 4: Configure RV Link (Optional)
+### Step 2: Install RV Link
 
-If you want to change default settings:
+1. Find "RV Link" in the store
+2. Click "Install"
+3. Wait for installation to complete
+
+### Step 3: Configure (Optional)
+
+If you need to adjust CAN interface or other settings:
 
 1. Settings → Add-ons → RV Link → Configuration
 2. Adjust options as needed (see Configuration Options above)
 3. Click "Save"
 
-### Step 5: Deploy the Project
+**Note for Existing Node-RED Users**: If you already have Node-RED installed with flows, you must enable `confirm_nodered_takeover: true` in the configuration before starting.
+
+### Step 4: Connect CAN Hardware (Optional)
+
+1. Connect your USB-CAN adapter (e.g., CandleLight, Toucan)
+2. Verify it appears as `can0` (or adjust `can_interface` config)
+
+**Note**: RV Link will work without CAN hardware, but the bridge functionality will be disabled.
+
+### Step 5: Start the Add-on
 
 1. Settings → Add-ons → RV Link
 2. Click "Start"
 3. Watch the logs to see progress
-4. Wait for "🎉 RV Link deployment complete!"
 
-### Step 6: Access Your Project
+The add-on will:
+- Install Mosquitto (if needed)
+- Install Node-RED (if needed)
+- Deploy the RV Link project
+- Start the CAN-MQTT bridge (if hardware available)
+
+### Step 6: Access Node-RED
 
 1. Settings → Add-ons → Node-RED → Open Web UI
 2. If prompted, select the "rv-link" project
-3. Your flows are ready to deploy!
+3. Deploy the flows if needed
 
-## Updating the Project
+## Updating the Add-on
 
 ### When Updates Are Available
 
@@ -147,15 +175,16 @@ You'll see an update notification in Home Assistant when a new version is releas
 
 1. Settings → Add-ons → RV Link
 2. Click "Update"
-3. After update completes, click "Start"
-4. The project will be updated automatically
+3. Wait for update to complete
+4. The add-on will restart automatically with the new version
 
-### Update Behavior
+### What Gets Updated
 
-- **No local changes**: Project updates automatically
-- **Local changes exist**:
-  - If `force_update: true` (default): Local changes overwritten with latest version
-  - If `force_update: false`: Update skipped, local changes preserved
+- Add-on code and dependencies
+- Bundled Node-RED project (always replaced with latest version)
+- CAN bridge improvements
+
+**Important**: Updating always replaces the Node-RED project with the bundled version. If you've made local changes to flows, they will be overwritten. To preserve custom flows, fork the project repository.
 
 ## Project Location
 
@@ -168,27 +197,40 @@ This location is shared between add-ons and persists across restarts.
 
 ## Troubleshooting
 
-### Error: "Node-RED addon not found!"
+### Error: "MQTT broker is not responding"
 
-**Cause**: Node-RED is not installed.
-
-**Solution**: Install Node-RED from the Add-on Store first.
-
-### Error: "Node-RED is not installed!"
-
-**Cause**: Node-RED is in the store but not installed yet.
-
-**Solution**: Complete the Node-RED installation before running RV Link.
-
-### Warning: "Local changes detected - forcing update"
-
-**Cause**: You've modified the project locally and `force_update` is `true` (default).
+**Cause**: Mosquitto failed to start or is not accepting connections.
 
 **Solution**:
-- To accept latest version: No action needed (changes will be overwritten)
-- To preserve your changes: Set `force_update: false` in configuration
+1. Check Mosquitto add-on logs: Settings → Add-ons → Mosquitto broker → Log
+2. Ensure Mosquitto is running
+3. Restart RV Link after fixing Mosquitto
 
-### Node-RED doesn't show the project
+### Warning: "CAN bridge will NOT start - hardware not available"
+
+**Cause**: No CAN hardware detected or wrong interface name.
+
+**Solution**:
+1. Verify USB-CAN adapter is connected
+2. Check interface name with `ip link show` in Terminal
+3. Update `can_interface` config if not `can0`
+4. Restart add-on after connecting hardware
+
+**Note**: This is not a fatal error - orchestration and Node-RED will still work.
+
+### Error: "Installation aborted to protect existing flows"
+
+**Cause**: Node-RED is already installed and `confirm_nodered_takeover` is not enabled.
+
+**Solution**:
+1. **Important**: This protects your existing Node-RED flows from being overwritten
+2. If you want RV Link to take over Node-RED:
+   - Go to RV Link configuration
+   - Set `confirm_nodered_takeover: true`
+   - Restart RV Link
+3. **Warning**: This will replace your current Node-RED flows
+
+### Node-RED doesn't show the rv-link project
 
 **Cause**: Project mode might not have initialized properly.
 
@@ -196,16 +238,32 @@ This location is shared between add-ons and persists across restarts.
 1. Open Node-RED Web UI
 2. Look for project selector (top right or in menu)
 3. Select "rv-link" project
-4. If no project selector appears, check Node-RED logs
+4. If no project selector appears:
+   - Check Node-RED add-on logs
+   - Restart Node-RED add-on
+   - Check RV Link logs for deployment errors
 
-### Project cloning fails
+### CAN frames not appearing in MQTT
 
-**Cause**: Network issues or GitHub connectivity problems.
+**Cause**: CAN bridge not running or wrong topic.
 
 **Solution**:
-- Check your internet connection
-- Verify GitHub is accessible from your network
-- Check add-on logs for specific error messages
+1. Check RV Link logs for "Bridge processes started"
+2. Verify CAN traffic exists: `candump can0` in Terminal
+3. Check MQTT topic: default is `can/raw`
+4. Monitor MQTT with MQTT Explorer or `mosquitto_sub -v -t "can/#"`
+
+### Add-on keeps restarting
+
+**Cause**: Critical error during startup.
+
+**Solution**:
+1. Check logs: Settings → Add-ons → RV Link → Log
+2. Look for errors in Phase 1 (Orchestration), Phase 2 (Deployment), or Phase 3 (Bridge)
+3. Common issues:
+   - Mosquitto installation failed (check internet connection)
+   - Node-RED configuration error (check Node-RED logs)
+   - CAN interface error (check hardware)
 
 ## Advanced Usage
 

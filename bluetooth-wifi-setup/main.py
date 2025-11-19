@@ -4,9 +4,12 @@ import subprocess
 from time import sleep
 
 from app.utils.logger import mLOG
+from app.utils.config import ConfigData
 from app.ble.manager import BLEManager
 
 if __name__ == "__main__":
+    # Initialize configuration from command-line arguments
+    ConfigData.initialize()
     restart_count = 0
 
     def btRestart():
