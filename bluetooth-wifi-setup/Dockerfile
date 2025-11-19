@@ -38,10 +38,6 @@ RUN apk add --no-cache \
 COPY run.sh /
 COPY main.py /
 COPY app /app
-COPY requirements.txt /
-
-# Install Python dependencies
-RUN pip3 install --no-cache-dir -r /requirements.txt
 
 # Make run script executable
 RUN chmod a+x /run.sh

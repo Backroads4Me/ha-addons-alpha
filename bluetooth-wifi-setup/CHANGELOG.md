@@ -9,6 +9,7 @@
 - Connection verification after WiFi network configuration
 - WiFi adapter check now fails addon startup if no adapter present
 - Removed duplicate Python packages from requirements.txt
+- Removed pip install step from Dockerfile (all deps via Alpine packages)
 
 ## [0.0.3] - 2025-11-19
 
