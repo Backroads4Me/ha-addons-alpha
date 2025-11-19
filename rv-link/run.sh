@@ -24,7 +24,9 @@ CAN_BITRATE=$(bashio::config 'can_bitrate')
 MQTT_TOPIC_RAW=$(bashio::config 'mqtt_topic_raw')
 MQTT_TOPIC_SEND=$(bashio::config 'mqtt_topic_send')
 MQTT_TOPIC_STATUS=$(bashio::config 'mqtt_topic_status')
-DEBUG_LOGGING=$(bashio::config 'debug_logging')
+# FORCE DEBUG LOGGING FOR DIAGNOSTICS
+DEBUG_LOGGING="true" 
+# DEBUG_LOGGING=$(bashio::config 'debug_logging')
 
 # MQTT Config (Auto-discovery or Manual)
 if bashio::services.available "mqtt"; then
@@ -68,7 +70,8 @@ api_call() {
     local response=$(curl -s -X "$method" -H "$AUTH_HEADER" "$SUPERVISOR$endpoint")
   fi
   
-  log_debug "API Response: $response"
+  # ALWAYS log response to stderr for diagnostics
+  echo "[DEBUG] API Response ($endpoint): $response" >&2
   echo "$response"
 }
 
@@ -147,6 +150,11 @@ set_options() {
 # ========================
 bashio::log.info "📋 Phase 1: System Orchestration"
 log_debug "Debug logging enabled. This will be verbose."
+
+# DIAGNOSTIC: List all installed addons
+bashio::log.info "🔍 Diagnostic: Listing installed addons..."
+INSTALLED_ADDONS=$(api_call GET "/addons")
+echo "[DEBUG] Installed Addons: $INSTALLED_ADDONS" >&2
 
 # 1. Mosquitto
 if is_installed "$SLUG_MOSQUITTO"; then
