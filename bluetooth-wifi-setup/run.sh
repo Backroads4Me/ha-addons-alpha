@@ -23,6 +23,14 @@ bashio::log.info "Device name: ${DEVICE_NAME}"
 if ! ls /sys/class/bluetooth/hci* > /dev/null 2>&1; then
     bashio::log.error "No Bluetooth adapter found!"
     bashio::log.error "Please ensure your system has a Bluetooth adapter and BlueZ is accessible."
+    # Debug: List bluetooth devices
+    if command -v bluetoothctl &> /dev/null; then
+        bashio::log.info "Bluetooth devices:"
+        bluetoothctl list
+    else
+        bashio::log.info "bluetoothctl not found, checking /sys/class/bluetooth:"
+        ls -l /sys/class/bluetooth/
+    fi
     exit 1
 fi
 

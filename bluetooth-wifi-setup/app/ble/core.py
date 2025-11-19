@@ -67,14 +67,16 @@ class Blue:
 
                     break
             if not found_flag:
-                mLOG.log("No suitable Bluetooth adapter found")
+                mLOG.log("No suitable Bluetooth adapter found. Listing all managed objects:", level=mLOG.CRITICAL)
+                for item in all.items():
+                    mLOG.log(f"Object: {item[0]}", level=mLOG.CRITICAL)
                 #raise Exception("No suitable Bluetooth adapter found")
             
         except dbus.exceptions.DBusException as e:
-            mLOG.log(f"DBus error in set_adapter: {str(e)}")
+            mLOG.log(f"DBus error in set_adapter: {str(e)}", level=mLOG.CRITICAL)
             raise
         except Exception as e:
-            mLOG.log(f"Error in set_adapter: {str(e)}")
+            mLOG.log(f"Error in set_adapter: {str(e)}", level=mLOG.CRITICAL)
             raise
 
 

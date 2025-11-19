@@ -50,7 +50,8 @@ MQTT_AUTH_ARGS=""
 # ========================
 log_debug() {
   if [ "$DEBUG_LOGGING" = "true" ]; then
-    bashio::log.info "[DEBUG] $1"
+    # Log to stderr to avoid polluting stdout (which is captured by $())
+    echo "[DEBUG] $1" >&2
   fi
 }
 
@@ -59,7 +60,6 @@ api_call() {
   local endpoint=$2
   local data=${3:-}
   
-  # TODO: Remove detailed API logging after testing
   log_debug "API Call: $method $endpoint"
   if [ -n "$data" ]; then
     log_debug "API Data: $data"
@@ -68,23 +68,27 @@ api_call() {
     local response=$(curl -s -X "$method" -H "$AUTH_HEADER" "$SUPERVISOR$endpoint")
   fi
   
-  # TODO: Remove response logging after testing (potential security risk if secrets are logged)
   log_debug "API Response: $response"
   echo "$response"
 }
 
 is_installed() {
   local slug=$1
-  log_debug "Checking if $slug is installed..."
-  echo "$(api_call GET "/addons/$slug/info")" | jq -e '.result == "ok"' >/dev/null 2>&1
+  local response
+  response=$(api_call GET "/addons/$slug/info")
+  
+  # Diagnostic logging for troubleshooting
+  if [ "$DEBUG_LOGGING" = "true" ]; then
+      echo "[DEBUG] Check $slug installed response: $response" >&2
+  fi
+
+  echo "$response" | jq -e '.result == "ok"' >/dev/null 2>&1
 }
 
 is_running() {
   local slug=$1
-  log_debug "Checking if $slug is running..."
   local state
   state=$(echo "$(api_call GET "/addons/$slug/info")" | jq -r '.data.state // "unknown"')
-  log_debug "$slug state: $state"
   [ "$state" == "started" ]
 }
 
@@ -104,7 +108,14 @@ install_addon() {
 start_addon() {
   local slug=$1
   bashio::log.info "   > Starting $slug..."
-  api_call POST "/addons/$slug/start" > /dev/null
+  local result
+  result=$(api_call POST "/addons/$slug/start")
+  
+  if ! echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
+      bashio::log.error "   ❌ Failed to start $slug. API Response: $(echo "$result" | jq -r '.message // "Unknown error"')"
+      return 1
+  fi
+
   local retries=10
   while [ $retries -gt 0 ]; do
     if is_running "$slug"; then

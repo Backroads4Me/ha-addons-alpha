@@ -552,10 +552,15 @@ class WifiDataCharacteristic(Characteristic):
             # notification is in bytes, already has prefix separator and may be encrypted
             needToUnlock = thisNotification_bytes == self.service.notifications.unlockingMsg
             value = [dbus.Byte(b) for b in thisNotification_bytes]
-            self.PropertiesChanged("org.bluez.GattCharacteristic1", {"Value": value}, [])
-            mLOG.log('notification sent')
-            if needToUnlock:
-                self.service.cryptomgr.disableCrypto()
+            try:
+                self.PropertiesChanged("org.bluez.GattCharacteristic1", {"Value": value}, [])
+                mLOG.log('notification sent')
+                if needToUnlock:
+                    self.service.cryptomgr.disableCrypto()
+            except Exception as e:
+                mLOG.log(f"Error sending notification: {e}", level=mLOG.CRITICAL)
+                # If we can't notify, maybe the connection is dead. 
+                # We don't stop notifying here, we let the loop continue or StopNotify be called by the stack.
         return self.notifying
 
     def StartNotify(self):

@@ -34,15 +34,21 @@ if __name__ == "__main__":
             mLOG.log(f"An unexpected error occurred while checking bluetooth status: {e}", level=mLOG.CRITICAL)
 
     while True:
-        blemgr = BLEManager()
-        blemgr.start()
-        mLOG.log(f"ble manager has exited with need_restart = {blemgr.need_restart}")
-        restart_count += 1
-        #allow only two restart of bluetooth (from advertisement error: maximum exceeded)
-        # in case we get one for failed app register and one for failed advert register
-        if blemgr.need_restart and (restart_count < 3):
-            btRestart()
-        else:
+        try:
+            blemgr = BLEManager()
+            blemgr.start()
+            mLOG.log(f"ble manager has exited with need_restart = {blemgr.need_restart}")
+            restart_count += 1
+            #allow only two restart of bluetooth (from advertisement error: maximum exceeded)
+            # in case we get one for failed app register and one for failed advert register
+            if blemgr.need_restart and (restart_count < 3):
+                btRestart()
+            else:
+                break
+        except Exception as e:
+            mLOG.log(f"CRITICAL ERROR in main loop: {e}", level=mLOG.CRITICAL)
+            import traceback
+            mLOG.log(f"Traceback: {traceback.format_exc()}", level=mLOG.CRITICAL)
             break
 
     mLOG.log("btwifiset says: So long and thanks for all the fish")

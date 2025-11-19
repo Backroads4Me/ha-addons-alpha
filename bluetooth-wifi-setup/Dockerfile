@@ -25,20 +25,6 @@ RUN apk add --no-cache \
     python3 \
     py3-pip \
     py3-dbus \
-    py3-gobject3 \
-    py3-cryptography \
-    bluez \
-    bluez-libs \
-    bluez-deprecated \
-    dbus \
-    wireless-tools \
-    && rm -rf /var/cache/apk/*
-
-# Copy addon files
-COPY run.sh /
-COPY main.py /
-COPY app /app
-COPY requirements.txt /
 
 # Make run script executable
 RUN chmod a+x /run.sh
