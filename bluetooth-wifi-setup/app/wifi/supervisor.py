@@ -94,11 +94,19 @@ class SupervisorAPI:
                 if not ssid or ssid == '--':
                     continue
 
-                # Signal strength: Supervisor gives dBm (-100 to 0), convert to 0-5 scale
-                # Typical range: -90 (poor) to -30 (excellent)
-                signal_dbm = ap.get('signal', -100)
-                # Convert -100 to -25 dBm range to 0-5 scale
-                signal_strength = max(0, min(5, int((signal_dbm + 100) / 15)))
+                # Signal strength: Supervisor API format needs investigation
+                signal_raw = ap.get('signal', -100)
+                mLOG.log(f"Raw signal value for {ssid}: {signal_raw}")
+                
+                # Handle both percentage (0-100) and dBm (-100 to 0) formats
+                if signal_raw >= 0:
+                    # Likely percentage (0-100), convert to 0-5 scale
+                    signal_strength = max(0, min(5, int(signal_raw / 20)))
+                else:
+                    # Likely dBm (-100 to 0), convert to 0-5 scale
+                    signal_strength = max(0, min(5, int((signal_raw + 100) / 15)))
+                
+                mLOG.log(f"Converted signal for {ssid}: {signal_strength}")
 
                 # Check if network is encrypted (mode != 'open')
                 auth_mode = ap.get('mode', 'wpa-psk').lower()
@@ -110,7 +118,7 @@ class SupervisorAPI:
                     'encrypt': encrypted
                 })
 
-            mLOG.log(f"Found {len(access_points)} access points")
+            mLOG.log(f"Found {len(access_points)} access points after filtering")
             return access_points
 
         except Exception as e:

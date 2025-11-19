@@ -168,6 +168,7 @@ class Advertise(dbus.service.Object):
 
     def register_ad_callback(self):
         mLOG.log("GATT advertisement registered", level=mLOG.INFO)
+        mLOG.log(f"Advertisement properties: LocalName={self.properties.get('LocalName')}, ServiceUUIDs={self.properties.get('ServiceUUIDs')}", level=mLOG.INFO)
 
     def register_ad_error_callback(self,error):
         #Failed to register advertisement: org.bluez.Error.NotPermitted: Maximum advertisements reached

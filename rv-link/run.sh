@@ -210,14 +210,25 @@ else
 fi
 
 # Configure MQTT connection now that Mosquitto is running
-if bashio::services.available "mqtt"; then
-    bashio::log.info "   📡 MQTT service discovered"
+# Wait for MQTT service to be registered (takes a few seconds after start)
+bashio::log.info "   📡 Waiting for MQTT service registration..."
+MQTT_SERVICE_AVAILABLE=false
+for i in {1..30}; do
+    if bashio::services.available "mqtt" 2>/dev/null; then
+        MQTT_SERVICE_AVAILABLE=true
+        bashio::log.info "   ✅ MQTT service discovered"
+        break
+    fi
+    sleep 1
+done
+
+if [ "$MQTT_SERVICE_AVAILABLE" = "true" ]; then
     MQTT_HOST=$(bashio::services "mqtt" "host")
     MQTT_PORT=$(bashio::services "mqtt" "port")
     MQTT_USER=$(bashio::services "mqtt" "username")
     MQTT_PASS=$(bashio::services "mqtt" "password")
 else
-    bashio::log.info "   📡 Using manual MQTT configuration"
+    bashio::log.warning "   ⚠️  MQTT service not discovered, using manual configuration"
     MQTT_HOST=$(bashio::config 'mqtt_host')
     MQTT_PORT=$(bashio::config 'mqtt_port')
     MQTT_USER=$(bashio::config 'mqtt_user')

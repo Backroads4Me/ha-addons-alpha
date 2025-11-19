@@ -1,3 +1,8 @@
+## [0.5.1] - 2025-11-19
+
+### Fixed
+- Fixed MQTT authentication by waiting for service registration after Mosquitto starts
+
 ## [0.5.0] - 2025-11-19
 
 ### Fixed

@@ -1,3 +1,20 @@
+## [0.0.6] - 2025-11-19
+
+### Fixed
+
+- Signal strength conversion now handles both percentage and dBm formats
+- Added debug logging for raw signal values from Supervisor API
+
+### Added
+
+- Automatic detection of signal format (percentage vs dBm)
+
+## [0.0.5] - 2025-11-19
+
+### Added
+
+- Debug logging for BLE advertisement properties
+
 ## [0.0.4] - 2025-11-19
 
 ### Fixed
