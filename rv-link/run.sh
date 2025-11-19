@@ -48,26 +48,43 @@ MQTT_AUTH_ARGS=""
 # ========================
 # Orchestrator Helpers
 # ========================
+log_debug() {
+  if [ "$DEBUG_LOGGING" = "true" ]; then
+    bashio::log.info "[DEBUG] $1"
+  fi
+}
+
 api_call() {
   local method=$1
   local endpoint=$2
-  local data=$3
+  local data=${3:-}
+  
+  # TODO: Remove detailed API logging after testing
+  log_debug "API Call: $method $endpoint"
   if [ -n "$data" ]; then
-    curl -s -X "$method" -H "$AUTH_HEADER" -H "Content-Type: application/json" -d "$data" "$SUPERVISOR$endpoint"
+    log_debug "API Data: $data"
+    local response=$(curl -s -X "$method" -H "$AUTH_HEADER" -H "Content-Type: application/json" -d "$data" "$SUPERVISOR$endpoint")
   else
-    curl -s -X "$method" -H "$AUTH_HEADER" "$SUPERVISOR$endpoint"
+    local response=$(curl -s -X "$method" -H "$AUTH_HEADER" "$SUPERVISOR$endpoint")
   fi
+  
+  # TODO: Remove response logging after testing (potential security risk if secrets are logged)
+  log_debug "API Response: $response"
+  echo "$response"
 }
 
 is_installed() {
   local slug=$1
+  log_debug "Checking if $slug is installed..."
   echo "$(api_call GET "/addons/$slug/info")" | jq -e '.result == "ok"' >/dev/null 2>&1
 }
 
 is_running() {
   local slug=$1
+  log_debug "Checking if $slug is running..."
   local state
   state=$(echo "$(api_call GET "/addons/$slug/info")" | jq -r '.data.state // "unknown"')
+  log_debug "$slug state: $state"
   [ "$state" == "started" ]
 }
 
@@ -104,6 +121,7 @@ set_options() {
   local slug=$1
   local json=$2
   bashio::log.info "   > Configuring $slug..."
+  log_debug "Configuration JSON: $json"
   local result
   result=$(api_call POST "/addons/$slug/options" "{\"options\": $json}")
   if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
@@ -117,6 +135,7 @@ set_options() {
 # Phase 1: Orchestration
 # ========================
 bashio::log.info "📋 Phase 1: System Orchestration"
+log_debug "Debug logging enabled. This will be verbose."
 
 # 1. Mosquitto
 if is_installed "$SLUG_MOSQUITTO"; then
@@ -193,11 +212,13 @@ if [ -d "$NODERED_CONFIG_DIR" ] && [ -f "$SETTINGS_FILE" ]; then
      cp "$SETTINGS_FILE" "$SETTINGS_FILE.bak"
      
      # Use Python for robust file editing
+     # TODO: Remove verbose python logging after testing
      python3 -c "
 import sys
 import re
 
 file_path = '$SETTINGS_FILE'
+print(f'[DEBUG] Reading {file_path}')
 with open(file_path, 'r') as f:
     content = f.read()
 
@@ -211,9 +232,6 @@ config = '''
 '''
 
 # Find the last closing brace
-# We look for the last occurrence of '}' that closes the module.exports object
-# This is a heuristic, but safer than 'head -n -1'
-# We assume the file ends with '}' or '};' optionally followed by whitespace/comments
 match = re.search(r'}(\s*;?\s*)$', content)
 if match:
     # Insert before the last brace
@@ -256,7 +274,9 @@ PROJECT_PATH="$PROJECT_DIR/$PROJECT_NAME"
 # User requested "Update this addon -> changes installed".
 # So we should OVERWRITE.
 bashio::log.info "   📦 Installing bundled project to $PROJECT_PATH..."
+log_debug "Removing old project files..."
 rm -rf "$PROJECT_PATH"
+log_debug "Copying new project files from $BUNDLED_PROJECT..."
 cp -r "$BUNDLED_PROJECT" "$PROJECT_PATH"
 bashio::log.info "   ✅ Project deployed"
 
