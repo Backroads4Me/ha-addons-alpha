@@ -247,29 +247,10 @@ if is_installed "$SLUG_MOSQUITTO"; then
     start_addon "$SLUG_MOSQUITTO" || exit 1
   fi
 else
-  # Mosquitto is NOT installed. Check for conflicts.
-  if bashio::services.available "mqtt" &>/dev/null; then
-    # MQTT service exists. Check if it's provided by Mosquitto that we just haven't detected yet
-    # Get the service config to see which addon provides it
-    MQTT_SERVICE_INFO=$(bashio::services "mqtt" "host" 2>/dev/null || echo "")
-    log_debug "MQTT service detected. Host: $MQTT_SERVICE_INFO"
-
-    # If the host is core-mosquitto, then it's the official addon - just not detected by is_installed
-    if [[ "$MQTT_SERVICE_INFO" == *"core-mosquitto"* ]]; then
-      bashio::log.info "   ✅ Mosquitto broker detected via service discovery"
-    else
-      bashio::log.fatal "❌ CONFLICT DETECTED: An MQTT broker is already active, but it is not the official Mosquitto add-on."
-      bashio::log.fatal "   RV Link requires the official 'Mosquitto broker' add-on for guaranteed consistency."
-      bashio::log.fatal "   MQTT service host: $MQTT_SERVICE_INFO"
-      bashio::log.fatal "   Please uninstall your current MQTT broker and restart RV Link."
-      exit 1
-    fi
-  else
-    # No conflict, install Mosquitto
-    bashio::log.info "   📥 Mosquitto not found. Installing..."
-    install_addon "$SLUG_MOSQUITTO" || exit 1
-    start_addon "$SLUG_MOSQUITTO" || exit 1
-  fi
+  # Mosquitto is NOT installed. Install it.
+  bashio::log.info "   📥 Mosquitto not found. Installing..."
+  install_addon "$SLUG_MOSQUITTO" || exit 1
+  start_addon "$SLUG_MOSQUITTO" || exit 1
 fi
 
 # Ensure Mosquitto starts on boot
@@ -363,7 +344,7 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
 # Init command to configure settings.js (runs inside Node-RED container at startup)
 # Uses shell tools (sed, grep) that are available in Node-RED container
-SETTINGS_INIT_CMD='[ ! -f /config/settings.js ] && exit 0; grep -q "flowFile:" /config/settings.js || sed -i "s/module.exports = {/module.exports = {\\n    flowFile: \\"\/share\/rv-link\/flows.json\\",/" /config/settings.js; grep -q "contextStorage:" /config/settings.js || sed -i "s/module.exports = {/module.exports = {\\n    contextStorage: { default: \\"memoryOnly\\", memoryOnly: { module: \\"memory\\" }, file: { module: \\"localfilesystem\\" } },/" /config/settings.js; echo "Node-RED configuration complete"'
+SETTINGS_INIT_CMD='[ ! -f /config/settings.js ] && exit 0; grep -q "flowFile:" /config/settings.js || sed -i "s/module.exports = {/module.exports = {\\n    flowFile: \\"\/share\/rv-link\/flows.json\\",/" /config/settings.js; echo "Node-RED configuration complete"'
 
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
@@ -371,21 +352,10 @@ if [ -z "$SECRET" ]; then
   NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg secret "$NEW_SECRET" --arg initcmd "$SETTINGS_INIT_CMD" '. + {"credential_secret": $secret, "ssl": false, "init_commands": [$initcmd]}')
   set_options "$SLUG_NODERED" "$NEW_OPTIONS" || exit 1
 else
-  PROJECTS=$(echo "$NR_OPTIONS" | jq -r '.projects')
   INIT_COMMANDS=$(echo "$NR_OPTIONS" | jq -r '.init_commands // [] | length')
 
-  NEEDS_UPDATE=false
-  if [ "$PROJECTS" != "true" ]; then
-    bashio::log.info "   > Enabling projects..."
-    NEEDS_UPDATE=true
-  fi
-
   if [ "$INIT_COMMANDS" -eq 0 ]; then
-    bashio::log.info "   > Adding context storage init command..."
-    NEEDS_UPDATE=true
-  fi
-
-  if [ "$NEEDS_UPDATE" = "true" ]; then
+    bashio::log.info "   > Adding flowFile init command..."
     NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg initcmd "$SETTINGS_INIT_CMD" '. + {"init_commands": [$initcmd]}')
     set_options "$SLUG_NODERED" "$NEW_OPTIONS" || exit 1
   fi
@@ -404,7 +374,7 @@ set_boot_auto "$SLUG_NODERED" || bashio::log.warning "   ⚠️  Could not set N
 bashio::log.info "   📝 Settings.js will be configured via init_commands on Node-RED startup"
 log_debug "Current working directory: $(pwd)"
 log_debug "Root directory accessible paths: $(ls -la / | grep -E 'addon|config|share' || echo 'No matching directories')"
-bashio::log.info "   ℹ️  Flow file path and context storage will be configured automatically"
+bashio::log.info "   ℹ️  Flow file path will be configured automatically"
 
 # ========================
 # Phase 2: Deployment

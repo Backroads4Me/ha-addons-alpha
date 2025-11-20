@@ -26,24 +26,7 @@ All three components are configured to start automatically on Home Assistant boo
 
 ## Automatic Configuration
 
-RV Link automatically configures Node-RED with optimal settings:
-
-### Context Storage
-
-The add-on configures two context storage options:
-- **memoryOnly** (default): Fast, in-memory storage that resets on restart
-- **file**: Persistent storage saved to disk
-
-This allows your Node-RED flows to use context variables like:
-```javascript
-// Store in memory (faster, non-persistent)
-context.set("myValue", 123);
-
-// Store to file (slower, persists across restarts)
-context.set("myValue", 123, "file");
-```
-
-**Note**: The context storage configuration is applied once during initial installation and is automatically backed up before modification.
+RV Link automatically configures Node-RED to use the shared flow file at `/share/rv-link/flows.json`, allowing the addon to deploy and update the RV Link automation flows.
 
 ## Prerequisites
 

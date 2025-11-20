@@ -1,3 +1,11 @@
+## [0.6.2] - 2025-11-20
+
+### Fixed
+- Fixed Node-RED startup failure caused by malformed contextStorage sed command
+
+### Changed
+- Simplified Node-RED configuration to only set flowFile path (removed automatic contextStorage configuration)
+
 ## [0.6.1] - 2025-11-20
 
 ### Fixed
