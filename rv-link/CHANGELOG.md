@@ -1,8 +1,16 @@
 ## [0.4.9] - 2025-11-20
 
 ### Fixed
-- Fixed settings.js path from /addon_configs to /root/addon_configs
-- Added diagnostic logging for settings.js file location
+- Fixed false conflict error when Mosquitto is already installed by checking service hostname
+- Fixed Node-RED takeover permission check being bypassed when is_installed() fails to detect existing installation
+- Fixed settings.js timeout by increasing wait time to 120 seconds with two-stage waiting
+- Enhanced is_installed() function with better error handling and diagnostic logging
+- Improved error message when Node-RED is already installed to guide users to enable confirm_nodered_takeover setting
+
+### Changed
+- Changed settings.js context storage configuration to use Node-RED init_commands feature for reliable modification
+- Increased Node-RED initialization wait with progress indicators every 10 seconds
+- Added diagnostic logging for settings.js file detection
 
 ## [0.4.8] - 2025-11-19
 

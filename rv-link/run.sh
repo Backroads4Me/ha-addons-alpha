@@ -65,7 +65,17 @@ is_installed() {
       echo "[DEBUG] Check $slug installed response: $response" >&2
   fi
 
-  echo "$response" | jq -e '.data.installed == true' >/dev/null 2>&1
+  # Check if the API call was successful
+  if ! echo "$response" | jq -e '.result == "ok"' >/dev/null 2>&1; then
+    log_debug "API call to check $slug installation failed"
+    return 1
+  fi
+
+  # Check installation status
+  local installed=$(echo "$response" | jq -r '.data.installed // false')
+  log_debug "$slug installed status: $installed"
+
+  [ "$installed" == "true" ]
 }
 
 is_running() {
@@ -83,7 +93,22 @@ install_addon() {
   if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
     bashio::log.info "   ✅ Installed $slug"
   else
-    bashio::log.error "   ❌ Failed to install $slug: $(echo "$result" | jq -r '.message')"
+    local error_msg=$(echo "$result" | jq -r '.message')
+    bashio::log.error "   ❌ Failed to install $slug: $error_msg"
+
+    # Special handling for Node-RED already installed
+    if [[ "$slug" == "$SLUG_NODERED" ]] && [[ "$error_msg" == *"already installed"* ]]; then
+      bashio::log.error ""
+      bashio::log.error "   Node-RED is already installed on your system."
+      bashio::log.error "   To use it with RV Link, you must grant permission:"
+      bashio::log.error ""
+      bashio::log.error "   1. Go to the RV Link add-on Configuration tab"
+      bashio::log.error "   2. Enable the 'confirm_nodered_takeover' option"
+      bashio::log.error "   3. Save and restart the RV Link add-on"
+      bashio::log.error ""
+      bashio::log.error "   ⚠️  WARNING: This will replace your existing Node-RED flows with RV Link flows."
+    fi
+
     return 1
   fi
 }
@@ -190,16 +215,28 @@ echo "[DEBUG] Installed Addons: $INSTALLED_ADDONS" >&2
 # 1. Mosquitto
 if is_installed "$SLUG_MOSQUITTO"; then
   # Mosquitto is installed, ensure it's running
+  bashio::log.info "   ✅ Mosquitto is already installed"
   if ! is_running "$SLUG_MOSQUITTO"; then
     start_addon "$SLUG_MOSQUITTO" || exit 1
   fi
 else
   # Mosquitto is NOT installed. Check for conflicts.
   if bashio::services.available "mqtt"; then
-    bashio::log.fatal "❌ CONFLICT DETECTED: An MQTT broker is already active, but it is not the official Mosquitto add-on."
-    bashio::log.fatal "   RV Link requires the official 'Mosquitto broker' add-on for guaranteed consistency."
-    bashio::log.fatal "   Please uninstall your current MQTT broker and restart RV Link."
-    exit 1
+    # MQTT service exists. Check if it's provided by Mosquitto that we just haven't detected yet
+    # Get the service config to see which addon provides it
+    MQTT_SERVICE_INFO=$(bashio::services "mqtt" "host" 2>/dev/null || echo "")
+    log_debug "MQTT service detected. Host: $MQTT_SERVICE_INFO"
+
+    # If the host is core-mosquitto, then it's the official addon - just not detected by is_installed
+    if [[ "$MQTT_SERVICE_INFO" == *"core-mosquitto"* ]]; then
+      bashio::log.info "   ✅ Mosquitto broker detected via service discovery"
+    else
+      bashio::log.fatal "❌ CONFLICT DETECTED: An MQTT broker is already active, but it is not the official Mosquitto add-on."
+      bashio::log.fatal "   RV Link requires the official 'Mosquitto broker' add-on for guaranteed consistency."
+      bashio::log.fatal "   MQTT service host: $MQTT_SERVICE_INFO"
+      bashio::log.fatal "   Please uninstall your current MQTT broker and restart RV Link."
+      exit 1
+    fi
   else
     # No conflict, install Mosquitto
     bashio::log.info "   📥 Mosquitto not found. Installing..."
@@ -246,12 +283,31 @@ wait_for_mqtt "$MQTT_HOST" "$MQTT_PORT" "$MQTT_USER" "$MQTT_PASS" || {
 
 # 2. Node-RED
 CONFIRM_TAKEOVER=$(bashio::config 'confirm_nodered_takeover')
+NODERED_ALREADY_INSTALLED=false
 
 if is_installed "$SLUG_NODERED"; then
   bashio::log.info "   ℹ️  Node-RED is already installed."
-  
-  # If installed, we MUST check for permission to take over
+  NODERED_ALREADY_INSTALLED=true
+else
+  # Try to install Node-RED
+  bashio::log.info "   📥 Node-RED not found. Installing..."
+  if ! install_addon "$SLUG_NODERED"; then
+    # Installation failed - check if it's because it's already installed
+    local nr_check=$(api_call GET "/addons/$SLUG_NODERED/info")
+    if echo "$nr_check" | jq -e '.data.installed == true' >/dev/null 2>&1; then
+      bashio::log.info "   ℹ️  Node-RED was already installed (detection issue)"
+      NODERED_ALREADY_INSTALLED=true
+    else
+      # Different error, exit
+      exit 1
+    fi
+  fi
+fi
+
+# If Node-RED was already installed, check for takeover permission
+if [ "$NODERED_ALREADY_INSTALLED" = "true" ]; then
   if [ "$CONFIRM_TAKEOVER" != "true" ]; then
+     bashio::log.warning ""
      bashio::log.warning "   ⚠️  EXISTING INSTALLATION DETECTED"
      bashio::log.warning "   RV Link needs to configure Node-RED to run the RV Link project."
      bashio::log.warning "   This will REPLACE your active Node-RED flows."
@@ -260,14 +316,12 @@ if is_installed "$SLUG_NODERED"; then
      bashio::log.warning "   1. Go to the RV Link add-on configuration."
      bashio::log.warning "   2. Enable 'confirm_nodered_takeover'."
      bashio::log.warning "   3. Restart RV Link."
+     bashio::log.warning ""
      bashio::log.fatal "   ❌ Installation aborted to protect existing flows."
      exit 1
   else
      bashio::log.info "   ✅ Permission granted to take over Node-RED."
   fi
-else
-  bashio::log.info "   📥 Node-RED not found. Installing..."
-  install_addon "$SLUG_NODERED" || exit 1
 fi
 
 # Configure Node-RED
@@ -275,16 +329,32 @@ NR_INFO=$(api_call GET "/addons/$SLUG_NODERED/info")
 NR_OPTIONS=$(echo "$NR_INFO" | jq '.data.options')
 SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
+# Init command to add context storage to settings.js (runs inside Node-RED container)
+# This runs at Node-RED startup and modifies /config/settings.js if contextStorage isn't already present
+CONTEXT_STORAGE_INIT_CMD='if [ -f /config/settings.js ] && ! grep -q "contextStorage" /config/settings.js; then sed -i "s/module.exports = {/module.exports = {\n    contextStorage: { default: \"memoryOnly\", memoryOnly: { module: \"memory\" }, file: { module: \"localfilesystem\" } },/" /config/settings.js; fi'
+
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
   NEW_SECRET=$(openssl rand -hex 16)
-  NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg secret "$NEW_SECRET" '. + {"credential_secret": $secret, "projects": true, "ssl": false}')
+  NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg secret "$NEW_SECRET" --arg initcmd "$CONTEXT_STORAGE_INIT_CMD" '. + {"credential_secret": $secret, "projects": true, "ssl": false, "init_commands": [$initcmd]}')
   set_options "$SLUG_NODERED" "$NEW_OPTIONS" || exit 1
 else
   PROJECTS=$(echo "$NR_OPTIONS" | jq -r '.projects')
+  INIT_COMMANDS=$(echo "$NR_OPTIONS" | jq -r '.init_commands // [] | length')
+
+  NEEDS_UPDATE=false
   if [ "$PROJECTS" != "true" ]; then
     bashio::log.info "   > Enabling projects..."
-    NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq '. + {"projects": true}')
+    NEEDS_UPDATE=true
+  fi
+
+  if [ "$INIT_COMMANDS" -eq 0 ]; then
+    bashio::log.info "   > Adding context storage init command..."
+    NEEDS_UPDATE=true
+  fi
+
+  if [ "$NEEDS_UPDATE" = "true" ]; then
+    NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg initcmd "$CONTEXT_STORAGE_INIT_CMD" '. + {"projects": true, "init_commands": [$initcmd]}')
     set_options "$SLUG_NODERED" "$NEW_OPTIONS" || exit 1
   fi
 fi
@@ -294,22 +364,45 @@ if ! is_running "$SLUG_NODERED"; then
 fi
 
 # Wait for Node-RED to create settings.js
-NODERED_CONFIG_DIR="/root/addon_configs/$SLUG_NODERED"
+NODERED_CONFIG_DIR="/addon_configs/$SLUG_NODERED"
 SETTINGS_FILE="$NODERED_CONFIG_DIR/settings.js"
 bashio::log.info "   ⏳ Waiting for Node-RED to initialize..."
 log_debug "Looking for settings.js at: $SETTINGS_FILE"
-for i in {1..30}; do
-    if [ -f "$SETTINGS_FILE" ]; then
-        bashio::log.info "   ✅ Node-RED settings file created"
+
+# Stage 1: Wait for config directory to be created (up to 60 seconds)
+for i in {1..60}; do
+    if [ -d "$NODERED_CONFIG_DIR" ]; then
+        log_debug "Config directory created after $i seconds"
         break
+    fi
+    if [ $((i % 10)) -eq 0 ]; then
+        bashio::log.info "   ⏳ Still waiting for Node-RED config directory... (${i}s)"
     fi
     sleep 1
 done
 
+# Stage 2: Wait for settings.js to be created (up to 60 more seconds)
+if [ -d "$NODERED_CONFIG_DIR" ]; then
+    for i in {1..60}; do
+        if [ -f "$SETTINGS_FILE" ]; then
+            bashio::log.info "   ✅ Node-RED settings file created"
+            break
+        fi
+        if [ $((i % 10)) -eq 0 ]; then
+            bashio::log.info "   ⏳ Still waiting for settings.js file... (${i}s)"
+        fi
+        sleep 1
+    done
+fi
+
 # Debug: List what's actually in the directory if file not found
 if [ ! -f "$SETTINGS_FILE" ]; then
-    log_debug "Settings file not found. Directory contents:"
-    log_debug "$(ls -la "$NODERED_CONFIG_DIR" 2>&1 || echo 'Directory does not exist')"
+    log_debug "Settings file not found after waiting. Directory contents:"
+    if [ -d "$NODERED_CONFIG_DIR" ]; then
+        log_debug "$(ls -la "$NODERED_CONFIG_DIR" 2>&1)"
+    else
+        log_debug "Directory does not exist: $NODERED_CONFIG_DIR"
+    fi
 fi
 
 # Context Storage Configuration
