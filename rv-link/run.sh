@@ -344,7 +344,7 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
 # Init command to configure settings.js (runs inside Node-RED container at startup)
 # Uses shell tools (sed, grep) that are available in Node-RED container
-SETTINGS_INIT_CMD='[ ! -f /config/settings.js ] && exit 0; grep -q "flowFile:" /config/settings.js || sed -i "s/module.exports = {/module.exports = {\\n    flowFile: \\"\/share\/rv-link\/flows.json\\",/" /config/settings.js; echo "Node-RED configuration complete"'
+SETTINGS_INIT_CMD='[ ! -f /config/settings.js ] && exit 0; grep -q "flowFile:" /config/settings.js || sed -i "s|module.exports = {|module.exports = {\\n    flowFile: \"/share/rv-link/flows.json\",\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|" /config/settings.js; echo "Node-RED configuration complete"'
 
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
@@ -387,24 +387,27 @@ FLOWS_FILE="$PROJECT_PATH/flows.json"
 # Ensure directory exists
 mkdir -p "$PROJECT_PATH"
 
-if [ -f "$FLOWS_FILE" ]; then
+# Ensure directory exists
+mkdir -p "$PROJECT_PATH"
+
+# Check if project directory is populated
+if [ "$(ls -A $PROJECT_PATH)" ]; then
     if [ "$PRESERVE_CUSTOMIZATIONS" = "true" ]; then
-        bashio::log.info "   ℹ️  Flows already exist at $FLOWS_FILE"
+        bashio::log.info "   ℹ️  Project files found at $PROJECT_PATH"
         bashio::log.info "   ℹ️  Preserving customizations (set preserve_project_customizations=false to update)"
-        log_debug "Skipping flows deployment to preserve user changes"
+        log_debug "Skipping project deployment to preserve user changes"
     else
-        bashio::log.info "   🔄 Updating flows with bundled version..."
-        log_debug "Copying new flows from $BUNDLED_PROJECT..."
-        cp "$BUNDLED_PROJECT/flows.json" "$FLOWS_FILE"
-        bashio::log.info "   ✅ Flows deployed (updated)"
+        bashio::log.info "   🔄 Updating project with bundled version..."
+        log_debug "Syncing files from $BUNDLED_PROJECT to $PROJECT_PATH..."
+        # Copy all files, including hidden ones, recursively
+        cp -rf "$BUNDLED_PROJECT/." "$PROJECT_PATH/"
+        bashio::log.info "   ✅ Project files deployed (updated)"
     fi
 else
-    bashio::log.info "   📦 Installing bundled flows to $FLOWS_FILE..."
-    log_debug "Copying flows from $BUNDLED_PROJECT..."
-    cp "$BUNDLED_PROJECT/flows.json" "$FLOWS_FILE"
-    # Copy any additional files (README, etc) if they exist
-    [ -f "$BUNDLED_PROJECT/README.md" ] && cp "$BUNDLED_PROJECT/README.md" "$PROJECT_PATH/"
-    bashio::log.info "   ✅ Flows deployed (first install)"
+    bashio::log.info "   📦 Installing bundled project to $PROJECT_PATH..."
+    log_debug "Copying files from $BUNDLED_PROJECT..."
+    cp -rf "$BUNDLED_PROJECT/." "$PROJECT_PATH/"
+    bashio::log.info "   ✅ Project files deployed (first install)"
 fi
 
 # Restart Node-RED to pick up new flows
@@ -434,14 +437,16 @@ CAN_BRIDGE_CONFIG=$(cat <<EOF
 {
   "options": {
     "can_interface": "$CAN_INTERFACE",
-    "can_bitrate": $CAN_BITRATE,
+    "can_bitrate": "$CAN_BITRATE",
     "mqtt_host": "$MQTT_HOST",
     "mqtt_port": $MQTT_PORT,
     "mqtt_user": "$MQTT_USER",
     "mqtt_pass": "$MQTT_PASS",
     "mqtt_topic_raw": "$MQTT_TOPIC_RAW",
     "mqtt_topic_send": "$MQTT_TOPIC_SEND",
-    "mqtt_topic_status": "$MQTT_TOPIC_STATUS"
+    "mqtt_topic_status": "$MQTT_TOPIC_STATUS",
+    "debug_logging": false,
+    "ssl": false
   }
 }
 EOF

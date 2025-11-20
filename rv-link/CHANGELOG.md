@@ -1,3 +1,13 @@
+## [0.6.3] - 2025-11-20
+
+### Fixed
+- Fixed CAN-MQTT Bridge configuration failure by adding missing `ssl` and `debug_logging` fields to options payload
+- Fixed Node-RED configuration failure by correcting `sed` command delimiter in `init_commands`
+
+### Changed
+- Updated Node-RED deployment to sync the entire project directory (recursively) instead of just `flows.json`, ensuring all assets are available
+- Added explicit Node-RED context storage configuration (default: memory, file: localfilesystem) to `settings.js` injection
+
 ## [0.6.2] - 2025-11-20
 
 ### Fixed
