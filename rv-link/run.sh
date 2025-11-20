@@ -227,6 +227,37 @@ wait_for_mqtt() {
   bashio::log.error "   ❌ MQTT broker not responding"
   return 1
 }
+# ========================
+# Phase 0: Deployment
+# ========================
+bashio::log.info "📋 Phase 0: Deploying Files"
+
+PRESERVE_CUSTOMIZATIONS=$(bashio::config 'preserve_project_customizations')
+FLOWS_FILE="$PROJECT_PATH/flows.json"
+
+# Ensure directory exists
+mkdir -p "$PROJECT_PATH"
+
+# Check if project directory is populated
+if [ "$(ls -A $PROJECT_PATH)" ]; then
+    if [ "$PRESERVE_CUSTOMIZATIONS" = "true" ]; then
+        bashio::log.info "   ℹ️  Project files found at $PROJECT_PATH"
+        bashio::log.info "   ℹ️  Preserving customizations (set preserve_project_customizations=false to update)"
+        log_debug "Skipping project deployment to preserve user changes"
+    else
+        bashio::log.info "   🔄 Updating project with bundled version..."
+        log_debug "Syncing files from $BUNDLED_PROJECT to $PROJECT_PATH..."
+        # Copy all files, including hidden ones, recursively
+        cp -rf "$BUNDLED_PROJECT/." "$PROJECT_PATH/"
+        bashio::log.info "   ✅ Project files deployed (updated)"
+    fi
+else
+    bashio::log.info "   📦 Installing bundled project to $PROJECT_PATH..."
+    log_debug "Copying files from $BUNDLED_PROJECT..."
+    cp -rf "$BUNDLED_PROJECT/." "$PROJECT_PATH/"
+    bashio::log.info "   ✅ Project files deployed (first install)"
+fi
+
 
 # ========================
 # Phase 1: Orchestration
@@ -352,12 +383,14 @@ if [ -z "$SECRET" ]; then
   NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg secret "$NEW_SECRET" --arg initcmd "$SETTINGS_INIT_CMD" '. + {"credential_secret": $secret, "ssl": false, "init_commands": [$initcmd]}')
   set_options "$SLUG_NODERED" "$NEW_OPTIONS" || exit 1
 else
-  INIT_COMMANDS=$(echo "$NR_OPTIONS" | jq -r '.init_commands // [] | length')
+  CURRENT_INIT_CMD=$(echo "$NR_OPTIONS" | jq -r '.init_commands[0] // empty')
 
-  if [ "$INIT_COMMANDS" -eq 0 ]; then
-    bashio::log.info "   > Adding flowFile init command..."
+  if [ "$CURRENT_INIT_CMD" != "$SETTINGS_INIT_CMD" ]; then
+    bashio::log.info "   > Updating Node-RED init commands..."
     NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg initcmd "$SETTINGS_INIT_CMD" '. + {"init_commands": [$initcmd]}')
     set_options "$SLUG_NODERED" "$NEW_OPTIONS" || exit 1
+  else
+    bashio::log.info "   ✅ Node-RED init commands are up to date"
   fi
 fi
 
@@ -376,43 +409,6 @@ log_debug "Current working directory: $(pwd)"
 log_debug "Root directory accessible paths: $(ls -la / | grep -E 'addon|config|share' || echo 'No matching directories')"
 bashio::log.info "   ℹ️  Flow file path will be configured automatically"
 
-# ========================
-# Phase 2: Deployment
-# ========================
-bashio::log.info "📋 Phase 2: Deploying RV Link Flows"
-
-PRESERVE_CUSTOMIZATIONS=$(bashio::config 'preserve_project_customizations')
-FLOWS_FILE="$PROJECT_PATH/flows.json"
-
-# Ensure directory exists
-mkdir -p "$PROJECT_PATH"
-
-# Ensure directory exists
-mkdir -p "$PROJECT_PATH"
-
-# Check if project directory is populated
-if [ "$(ls -A $PROJECT_PATH)" ]; then
-    if [ "$PRESERVE_CUSTOMIZATIONS" = "true" ]; then
-        bashio::log.info "   ℹ️  Project files found at $PROJECT_PATH"
-        bashio::log.info "   ℹ️  Preserving customizations (set preserve_project_customizations=false to update)"
-        log_debug "Skipping project deployment to preserve user changes"
-    else
-        bashio::log.info "   🔄 Updating project with bundled version..."
-        log_debug "Syncing files from $BUNDLED_PROJECT to $PROJECT_PATH..."
-        # Copy all files, including hidden ones, recursively
-        cp -rf "$BUNDLED_PROJECT/." "$PROJECT_PATH/"
-        bashio::log.info "   ✅ Project files deployed (updated)"
-    fi
-else
-    bashio::log.info "   📦 Installing bundled project to $PROJECT_PATH..."
-    log_debug "Copying files from $BUNDLED_PROJECT..."
-    cp -rf "$BUNDLED_PROJECT/." "$PROJECT_PATH/"
-    bashio::log.info "   ✅ Project files deployed (first install)"
-fi
-
-# Restart Node-RED to pick up new flows
-bashio::log.info "   🔄 Restarting Node-RED to load flows..."
-restart_addon "$SLUG_NODERED" || exit 1
 
 # ========================
 # Phase 3: CAN-MQTT Bridge

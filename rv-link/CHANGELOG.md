@@ -1,3 +1,9 @@
+## [0.6.4] - 2025-11-20
+
+### Fixed
+- Fixed race condition where Node-RED started before project files were deployed by moving deployment to Phase 0
+- Fixed `init_commands` not updating on existing installations by forcing update if command differs
+
 ## [0.6.3] - 2025-11-20
 
 ### Fixed
