@@ -1,3 +1,17 @@
+## [0.6.6] - 2025-11-20
+
+### Fixed
+- Switched to `rsync` for project file synchronization to ensure exact mirroring (deletes extraneous files)
+- Fixed `sed` regex compatibility for Node-RED configuration injection (using POSIX `[[:space:]]`)
+- Fixed file permissions for `/share/rv-link` to ensure Node-RED can read flows
+- Cleaned up verbose API logging
+
+## [0.6.5] - 2025-11-20
+
+### Fixed
+- Fixed race condition where Node-RED started before project files were deployed by moving deployment to Phase 0
+- Fixed `init_commands` not updating on existing installations by forcing update if command differs
+
 ## [0.6.4] - 2025-11-20
 
 ### Fixed

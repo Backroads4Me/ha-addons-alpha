@@ -11,6 +11,7 @@ RUN apk add --no-cache \
     curl \
     jq \
     bash \
+    rsync \
     mosquitto-clients \
     procps \
     coreutils \

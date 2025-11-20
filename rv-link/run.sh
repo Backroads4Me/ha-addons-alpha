@@ -52,7 +52,7 @@ api_call() {
   fi
   
   # ALWAYS log response to stderr for diagnostics
-  echo "[DEBUG] API Response ($endpoint): $response" >&2
+  # echo "[DEBUG] API Response ($endpoint): $response" >&2
   echo "$response"
 }
 
@@ -62,9 +62,9 @@ is_installed() {
   response=$(api_call GET "/addons/$slug/info")
 
   # Diagnostic logging for troubleshooting
-  if [ "$DEBUG_LOGGING" = "true" ]; then
-      echo "[DEBUG] Check $slug installed response: $response" >&2
-  fi
+  # if [ "$DEBUG_LOGGING" = "true" ]; then
+  #     echo "[DEBUG] Check $slug installed response: $response" >&2
+  # fi
 
   # Check if the API call was successful
   if ! echo "$response" | jq -e '.result == "ok"' >/dev/null 2>&1; then
@@ -247,14 +247,18 @@ if [ "$(ls -A $PROJECT_PATH)" ]; then
     else
         bashio::log.info "   🔄 Updating project with bundled version..."
         log_debug "Syncing files from $BUNDLED_PROJECT to $PROJECT_PATH..."
-        # Copy all files, including hidden ones, recursively
-        cp -rf "$BUNDLED_PROJECT/." "$PROJECT_PATH/"
+        # Sync all files, deleting extraneous ones in destination
+        rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
+        # Ensure permissions are open (Node-RED runs as non-root)
+        chmod -R 777 "$PROJECT_PATH"
         bashio::log.info "   ✅ Project files deployed (updated)"
     fi
 else
     bashio::log.info "   📦 Installing bundled project to $PROJECT_PATH..."
     log_debug "Copying files from $BUNDLED_PROJECT..."
-    cp -rf "$BUNDLED_PROJECT/." "$PROJECT_PATH/"
+    rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
+    # Ensure permissions are open (Node-RED runs as non-root)
+    chmod -R 777 "$PROJECT_PATH"
     bashio::log.info "   ✅ Project files deployed (first install)"
 fi
 
@@ -375,7 +379,7 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
 # Init command to configure settings.js (runs inside Node-RED container at startup)
 # Uses shell tools (sed, grep) that are available in Node-RED container
-SETTINGS_INIT_CMD='[ ! -f /config/settings.js ] && exit 0; grep -q "flowFile:" /config/settings.js || sed -i "s|module.exports\s*=\s*{|module.exports = {\\n    flowFile: \"/share/rv-link/flows.json\",\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|" /config/settings.js; echo "Node-RED configuration complete"'
+SETTINGS_INIT_CMD='[ ! -f /config/settings.js ] && exit 0; grep -q "flowFile:" /config/settings.js || sed -i "s|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    flowFile: \"/share/rv-link/flows.json\",\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|" /config/settings.js; echo "Node-RED configuration complete"'
 
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
