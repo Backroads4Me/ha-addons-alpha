@@ -1,3 +1,9 @@
+## [0.6.8] - 2025-11-20
+
+### Fixed
+- Added `-f` flag to `cp` command in `init_commands` to force overwrite of `flows.json`
+- Added debug logging to `init_commands` (output to `/share/rv-link/init_debug.log`) to troubleshoot file copying
+
 ## [0.6.7] - 2025-11-20
 
 ### Fixed

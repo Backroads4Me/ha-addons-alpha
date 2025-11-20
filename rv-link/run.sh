@@ -379,7 +379,7 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
 # Init command to configure settings.js (runs inside Node-RED container at startup)
 # Uses shell tools (sed, grep) that are available in Node-RED container
-SETTINGS_INIT_CMD='mkdir -p /config/projects/rv-link-node-red; cp -rf /share/rv-link/. /config/projects/rv-link-node-red/; cp /share/rv-link/flows.json /config/flows.json; [ ! -f /config/settings.js ] && exit 0; grep -q "contextStorage:" /config/settings.js || sed -i "s|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|" /config/settings.js; echo "Node-RED configuration complete"'
+SETTINGS_INIT_CMD='echo "Starting Init..." > /share/rv-link/init_debug.log; mkdir -p /config/projects/rv-link-node-red; cp -v -rf /share/rv-link/. /config/projects/rv-link-node-red/ >> /share/rv-link/init_debug.log 2>&1; echo "Copying flows..." >> /share/rv-link/init_debug.log; cp -vf /share/rv-link/flows.json /config/flows.json >> /share/rv-link/init_debug.log 2>&1; echo "Listing /config/flows.json:" >> /share/rv-link/init_debug.log; ls -la /config/flows.json >> /share/rv-link/init_debug.log 2>&1; [ ! -f /config/settings.js ] && exit 0; grep -q "contextStorage:" /config/settings.js || sed -i "s|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|" /config/settings.js; echo "Node-RED configuration complete" >> /share/rv-link/init_debug.log'
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
   NEW_SECRET=$(openssl rand -hex 16)
