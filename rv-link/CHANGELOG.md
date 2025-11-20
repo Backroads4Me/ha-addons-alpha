@@ -1,3 +1,44 @@
+## [0.6.0] - 2025-11-20
+
+### Changed
+- **BREAKING**: Separated CAN-MQTT bridge from bundled code to standalone addon installation
+- RV Link now installs three separate addons: Mosquitto, Node-RED, and CAN-MQTT Bridge
+- Removed CAN hardware dependencies from RV Link (moved to CAN-MQTT Bridge addon)
+- Simplified RV Link to pure orchestrator role
+- CAN-MQTT Bridge configured automatically with RV Link settings
+
+### Removed
+- Bundled CAN bridge implementation removed
+- CAN-related system dependencies removed from Dockerfile (can-utils, iproute2)
+- CAN hardware access permissions removed from config.yaml (privileged, devices, kernel_modules, host_network)
+
+## [0.5.3] - 2025-11-20
+
+### Added
+- Added set_boot_auto() function to configure addons to start on boot
+- RV Link, Mosquitto, and Node-RED now all start automatically on Home Assistant boot
+
+### Changed
+- Version bump to reflect breaking changes from 0.5.2
+- Changed RV Link boot configuration from manual to auto
+
+## [0.5.2] - 2025-11-20
+
+### Fixed
+- Fixed Node-RED startup failure caused by Python dependency and heredoc delimiter issues in init command
+
+### Added
+- Added preserve_project_customizations configuration option (default: false) to control flow deployment behavior
+
+### Changed
+- **BREAKING**: Simplified from Node-RED projects to direct flowFile approach
+- Removed unnecessary projects mode complexity (no Git integration needed)
+- Node-RED now loads flows directly from /share/rv-link/flows.json via flowFile setting
+- Deployment now copies flows.json file instead of full project directory
+- Init command significantly simplified - only sets flowFile path and contextStorage
+- Flows update to bundled version by default on every restart (ensures users get latest)
+- Users can enable preserve_project_customizations=true to keep their custom modifications
+
 ## [0.5.1] - 2025-11-20
 
 ### Fixed
@@ -5,11 +46,12 @@
 - Fixed Node-RED takeover permission check being bypassed when is_installed() fails to detect existing installation
 - Fixed is_installed() function to properly detect installed addons by checking version field when installed field is absent
 - Fixed syntax error from using local keyword outside of function
+- Fixed init command heredoc delimiter issue and Python dependency by switching to shell-based approach
 - Improved error message when Node-RED is already installed to guide users to enable confirm_nodered_takeover setting
 
 ### Changed
 - **BREAKING**: Removed addon_configs mapping as cross-container access is not possible
-- Completely redesigned settings.js configuration to use Python-based init_commands
+- Completely redesigned settings.js configuration to use shell-based init_commands (sed/grep)
 - Init command now properly enables projects mode in editorTheme section
 - Init command adds context storage configuration (memory and file)
 - Init command sets projectsDir to /share so Node-RED finds external projects

@@ -16,8 +16,9 @@ BUNDLED_PROJECT="/opt/rv-link-project"
 # Add-on Slugs
 SLUG_MOSQUITTO="core_mosquitto"
 SLUG_NODERED="a0d7b954_nodered"
+SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
-# Bridge Config
+# Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
 CAN_BITRATE=$(bashio::config 'can_bitrate')
 MQTT_TOPIC_RAW=$(bashio::config 'mqtt_topic_raw')
@@ -188,6 +189,19 @@ restart_addon() {
   return 1
 }
 
+set_boot_auto() {
+  local slug=$1
+  bashio::log.info "   > Setting $slug to start on boot..."
+  local result
+  result=$(api_call POST "/addons/$slug/options" '{"boot":"auto"}')
+  if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
+    bashio::log.info "   ✅ $slug will start on boot"
+  else
+    bashio::log.warning "   ⚠️  Failed to set boot option for $slug: $(echo "$result" | jq -r '.message')"
+    return 1
+  fi
+}
+
 wait_for_mqtt() {
   local host=$1
   local port=$2
@@ -257,6 +271,9 @@ else
     start_addon "$SLUG_MOSQUITTO" || exit 1
   fi
 fi
+
+# Ensure Mosquitto starts on boot
+set_boot_auto "$SLUG_MOSQUITTO" || bashio::log.warning "   ⚠️  Could not set Mosquitto to auto-start"
 
 # Configure MQTT connection now that Mosquitto is running
 # Wait for MQTT service to be registered (takes a few seconds after start)
@@ -345,87 +362,8 @@ NR_OPTIONS=$(echo "$NR_INFO" | jq '.data.options')
 SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
 # Init command to configure settings.js (runs inside Node-RED container at startup)
-# This modifies /config/settings.js to enable projects, add context storage, and configure project directory
-SETTINGS_INIT_CMD='python3 << "PYEOF"
-import re
-import os
-import json
-
-settings_file = "/config/settings.js"
-if not os.path.exists(settings_file):
-    exit(0)
-
-with open(settings_file, "r") as f:
-    content = f.read()
-
-modified = False
-
-# Enable projects if not already enabled
-if "editorTheme:" not in content or ("editorTheme:" in content and "projects:" not in content):
-    # Add or update editorTheme section
-    if "editorTheme:" in content:
-        # editorTheme exists, add projects to it
-        content = re.sub(
-            r"(editorTheme:\s*{)",
-            r"\1\n        projects: { enabled: true },",
-            content
-        )
-    else:
-        # Add complete editorTheme section
-        content = re.sub(
-            r"(module\.exports\s*=\s*{)",
-            r"\1\n    editorTheme: {\n        projects: { enabled: true }\n    },",
-            content
-        )
-    modified = True
-
-# Add context storage if not present
-if "contextStorage:" not in content:
-    content = re.sub(
-        r"(module\.exports\s*=\s*{)",
-        r"\1\n    contextStorage: {\n        default: \"memoryOnly\",\n        memoryOnly: { module: \"memory\" },\n        file: { module: \"localfilesystem\" }\n    },",
-        content
-    )
-    modified = True
-
-# Configure projects directory to use /share for external projects
-if "projectsDir:" not in content:
-    content = re.sub(
-        r"(module\.exports\s*=\s*{)",
-        r"\1\n    projectsDir: \"/share\",",
-        content
-    )
-    modified = True
-
-# Set active project to rv-link if projects settings file exists
-projects_file = "/config/projects/projects.json"
-if os.path.exists(projects_file):
-    try:
-        with open(projects_file, "r") as f:
-            projects_data = json.load(f)
-
-        # Set rv-link as the active project
-        if projects_data.get("activeProject") != "rv-link":
-            projects_data["activeProject"] = "rv-link"
-
-            # Add rv-link to projects list if not present
-            if "projects" not in projects_data:
-                projects_data["projects"] = {}
-            if "rv-link" not in projects_data["projects"]:
-                projects_data["projects"]["rv-link"] = {}
-
-            with open(projects_file, "w") as f:
-                json.dump(projects_data, f, indent=4)
-            print("Set rv-link as active project")
-    except Exception as e:
-        print(f"Could not update projects.json: {e}")
-
-if modified:
-    with open(settings_file, "w") as f:
-        f.write(content)
-    print("Settings.js updated successfully")
-PYEOF
-'
+# Uses shell tools (sed, grep) that are available in Node-RED container
+SETTINGS_INIT_CMD='[ ! -f /config/settings.js ] && exit 0; cp /config/settings.js /config/settings.js.bak 2>/dev/null || true; grep -q "flowFile:" /config/settings.js || sed -i "s/module.exports = {/module.exports = {\\n    flowFile: \\"\/share\/rv-link\/flows.json\\",/" /config/settings.js; grep -q "contextStorage:" /config/settings.js || sed -i "s/module.exports = {/module.exports = {\\n    contextStorage: { default: \\"memoryOnly\\", memoryOnly: { module: \\"memory\\" }, file: { module: \\"localfilesystem\\" } },/" /config/settings.js; echo "Node-RED configuration complete"'
 
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
@@ -457,129 +395,134 @@ if ! is_running "$SLUG_NODERED"; then
   start_addon "$SLUG_NODERED" || exit 1
 fi
 
+# Ensure Node-RED starts on boot
+set_boot_auto "$SLUG_NODERED" || bashio::log.warning "   ⚠️  Could not set Node-RED to auto-start"
+
 # Settings.js Configuration
 # Note: We cannot directly access Node-RED's settings.js from this container.
 # Instead, we use init_commands (configured above) which run inside the Node-RED container.
 bashio::log.info "   📝 Settings.js will be configured via init_commands on Node-RED startup"
 log_debug "Current working directory: $(pwd)"
 log_debug "Root directory accessible paths: $(ls -la / | grep -E 'addon|config|share' || echo 'No matching directories')"
-bashio::log.info "   ℹ️  Projects and context storage will be enabled automatically"
+bashio::log.info "   ℹ️  Flow file path and context storage will be configured automatically"
 
 # ========================
 # Phase 2: Deployment
 # ========================
-bashio::log.info "📋 Phase 2: Deploying RV Link Project"
-bashio::log.info "   📦 Installing bundled project to $PROJECT_PATH..."
-log_debug "Removing old project files..."
-rm -rf "$PROJECT_PATH"
-log_debug "Copying new project files from $BUNDLED_PROJECT..."
-cp -r "$BUNDLED_PROJECT" "$PROJECT_PATH"
-bashio::log.info "   ✅ Project deployed"
+bashio::log.info "📋 Phase 2: Deploying RV Link Flows"
+
+PRESERVE_CUSTOMIZATIONS=$(bashio::config 'preserve_project_customizations')
+FLOWS_FILE="$PROJECT_PATH/flows.json"
+
+# Ensure directory exists
+mkdir -p "$PROJECT_PATH"
+
+if [ -f "$FLOWS_FILE" ]; then
+    if [ "$PRESERVE_CUSTOMIZATIONS" = "true" ]; then
+        bashio::log.info "   ℹ️  Flows already exist at $FLOWS_FILE"
+        bashio::log.info "   ℹ️  Preserving customizations (set preserve_project_customizations=false to update)"
+        log_debug "Skipping flows deployment to preserve user changes"
+    else
+        bashio::log.info "   🔄 Updating flows with bundled version..."
+        log_debug "Backing up existing flows..."
+        cp "$FLOWS_FILE" "$FLOWS_FILE.bak" 2>/dev/null || true
+        log_debug "Copying new flows from $BUNDLED_PROJECT..."
+        cp "$BUNDLED_PROJECT/flows.json" "$FLOWS_FILE"
+        bashio::log.info "   ✅ Flows deployed (updated)"
+    fi
+else
+    bashio::log.info "   📦 Installing bundled flows to $FLOWS_FILE..."
+    log_debug "Copying flows from $BUNDLED_PROJECT..."
+    cp "$BUNDLED_PROJECT/flows.json" "$FLOWS_FILE"
+    # Copy any additional files (README, etc) if they exist
+    [ -f "$BUNDLED_PROJECT/README.md" ] && cp "$BUNDLED_PROJECT/README.md" "$PROJECT_PATH/"
+    bashio::log.info "   ✅ Flows deployed (first install)"
+fi
 
 # Restart Node-RED to pick up new flows
-bashio::log.info "   🔄 Restarting Node-RED to load new project..."
+bashio::log.info "   🔄 Restarting Node-RED to load flows..."
 restart_addon "$SLUG_NODERED" || exit 1
 
 # ========================
-# Phase 3: CAN Bridge
+# Phase 3: CAN-MQTT Bridge
 # ========================
-bashio::log.info "📋 Phase 3: Starting CAN Bridge"
+bashio::log.info "📋 Phase 3: Installing CAN-MQTT Bridge"
 
-# CAN Init
-CAN_AVAILABLE=false
-bashio::log.info "   > Initializing CAN interface $CAN_INTERFACE..."
-
-if [ -f "/sys/class/net/$CAN_INTERFACE/operstate" ] && [ "$(cat "/sys/class/net/$CAN_INTERFACE/operstate")" = "up" ]; then
-    ip link set "$CAN_INTERFACE" down
-fi
-
-if ip link set "$CAN_INTERFACE" up type can bitrate "$CAN_BITRATE" 2>/dev/null; then
-    if ip link set "$CAN_INTERFACE" up 2>/dev/null; then
-        bashio::log.info "   ✅ CAN interface up"
-        CAN_AVAILABLE=true
-    else
-        bashio::log.error "   ❌ Failed to bring CAN interface up"
+# Check if CAN-MQTT Bridge is installed
+if ! is_installed "$SLUG_CAN_BRIDGE"; then
+    bashio::log.info "   🔽 Installing CAN-MQTT Bridge addon..."
+    if ! install_addon "$SLUG_CAN_BRIDGE"; then
+        bashio::log.fatal "❌ Failed to install CAN-MQTT Bridge addon"
+        bashio::log.fatal "   This addon is essential for RV Link to function."
+        exit 1
     fi
 else
-    bashio::log.error "   ❌ Failed to configure CAN interface (bitrate: $CAN_BITRATE)"
-    bashio::log.error "   Possible causes:"
-    bashio::log.error "   - No CAN hardware connected"
-    bashio::log.error "   - Wrong interface name (current: $CAN_INTERFACE)"
-    bashio::log.error "   - Incompatible bitrate (current: $CAN_BITRATE)"
+    bashio::log.info "   ✅ CAN-MQTT Bridge addon already installed"
 fi
 
-if [ "$CAN_AVAILABLE" = "false" ]; then
-    bashio::log.warning "   ⚠️  CAN bridge will NOT start - hardware not available"
-    bashio::log.warning "   The system orchestration succeeded, but CAN monitoring is disabled."
-    bashio::log.warning "   Connect CAN hardware and restart this add-on to enable the bridge."
+# Configure CAN-MQTT Bridge with our settings
+bashio::log.info "   ⚙️  Configuring CAN-MQTT Bridge..."
+CAN_BRIDGE_CONFIG=$(cat <<EOF
+{
+  "options": {
+    "can_interface": "$CAN_INTERFACE",
+    "can_bitrate": $CAN_BITRATE,
+    "mqtt_host": "$MQTT_HOST",
+    "mqtt_port": $MQTT_PORT,
+    "mqtt_user": "$MQTT_USER",
+    "mqtt_pass": "$MQTT_PASS",
+    "mqtt_topic_raw": "$MQTT_TOPIC_RAW",
+    "mqtt_topic_send": "$MQTT_TOPIC_SEND",
+    "mqtt_topic_status": "$MQTT_TOPIC_STATUS"
+  }
+}
+EOF
+)
+
+result=$(api_call POST "/addons/$SLUG_CAN_BRIDGE/options" "$CAN_BRIDGE_CONFIG")
+if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
+    bashio::log.info "   ✅ CAN-MQTT Bridge configured"
+else
+    bashio::log.error "   ⚠️  Failed to configure CAN-MQTT Bridge: $(echo "$result" | jq -r '.message')"
 fi
 
-# Bridge Loop
+# Set CAN-MQTT Bridge to start on boot
+set_boot_auto "$SLUG_CAN_BRIDGE"
+
+# Start CAN-MQTT Bridge
+bashio::log.info "   ▶️  Starting CAN-MQTT Bridge..."
+result=$(api_call POST "/addons/$SLUG_CAN_BRIDGE/start")
+if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
+    bashio::log.info "   ✅ CAN-MQTT Bridge started"
+else
+    bashio::log.warning "   ⚠️  Failed to start CAN-MQTT Bridge: $(echo "$result" | jq -r '.message')"
+    bashio::log.warning "   Note: Bridge will fail if CAN hardware is not connected, but system orchestration succeeded."
+fi
+
+# ========================
+# All Systems Ready
+# ========================
 bashio::log.info "🚀 RV Link System Fully Operational"
+bashio::log.info ""
+bashio::log.info "   Components installed:"
+bashio::log.info "   ✅ Mosquitto MQTT Broker"
+bashio::log.info "   ✅ Node-RED Automation"
+bashio::log.info "   ✅ CAN-MQTT Bridge"
+bashio::log.info ""
+bashio::log.info "   💡 Access Node-RED: Settings → Add-ons → Node-RED → Open Web UI"
+bashio::log.info "   💡 CAN bridge status: Check CAN-MQTT Bridge addon logs"
+
+# Keep addon running as orchestrator
+bashio::log.info "   💤 RV Link orchestrator will remain running..."
 
 # Cleanup handler
 cleanup() {
-    bashio::log.info "Shutdown signal received..."
-    [ -n "$PID_C2M" ] && kill "$PID_C2M" 2>/dev/null
-    [ -n "$PID_M2C" ] && kill "$PID_M2C" 2>/dev/null
+    bashio::log.info "Shutdown signal received, exiting gracefully..."
     exit 0
 }
 trap cleanup SIGTERM SIGINT
 
-if [ "$CAN_AVAILABLE" = "true" ]; then
-    bashio::log.info "   🔗 Starting CAN-MQTT Bridge..."
-
-    # CAN -> MQTT
-    {
-        while true; do
-            candump -L "$CAN_INTERFACE" 2>/dev/null | awk '{print $3}' | \
-            while IFS= read -r frame; do
-                [ -n "$frame" ] && echo "$frame"
-            done | mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" $MQTT_AUTH_ARGS \
-                                -t "$MQTT_TOPIC_RAW" -q 1 -l
-            bashio::log.warning "CAN->MQTT bridge stopped, restarting in 5 seconds..."
-            sleep 5
-        done
-    } &
-    PID_C2M=$!
-
-    # MQTT -> CAN
-    {
-        while true; do
-            mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" $MQTT_AUTH_ARGS \
-                          -t "$MQTT_TOPIC_SEND" -q 1 | \
-            while IFS= read -r message; do
-                if [ -n "$message" ]; then
-                     cansend "$CAN_INTERFACE" "$message" 2>/dev/null || bashio::log.warning "Failed to send: $message"
-                fi
-            done
-            bashio::log.warning "MQTT->CAN bridge stopped, restarting in 5 seconds..."
-            sleep 5
-        done
-    } &
-    PID_M2C=$!
-
-    bashio::log.info "   ✅ Bridge processes started (C2M: $PID_C2M, M2C: $PID_M2C)"
-
-    # Monitor bridge processes
-    while true; do
-        if ! kill -0 "$PID_C2M" 2>/dev/null; then
-            bashio::log.error "❌ CAN->MQTT process died unexpectedly!"
-            exit 1
-        fi
-        if ! kill -0 "$PID_M2C" 2>/dev/null; then
-            bashio::log.error "❌ MQTT->CAN process died unexpectedly!"
-            exit 1
-        fi
-        sleep 10
-    done
-else
-    # No CAN hardware, just keep addon running
-    bashio::log.info "   💤 Running in orchestrator-only mode (no CAN bridge)"
-    bashio::log.info "   The add-on will remain running. Connect CAN hardware and restart to enable bridging."
-
-    # Sleep indefinitely
-    while true; do
-        sleep 3600
-    done
-fi
+# Sleep indefinitely
+while true; do
+    sleep 3600
+done
