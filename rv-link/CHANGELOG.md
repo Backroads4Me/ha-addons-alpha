@@ -1,3 +1,9 @@
+## [0.6.1] - 2025-11-20
+
+### Fixed
+- Fixed MQTT connectivity verification failure caused by missing mosquitto-clients dependency
+- Fixed "Service not enabled" error messages during MQTT service registration wait
+
 ## [0.6.0] - 2025-11-20
 
 ### Changed
@@ -6,11 +12,13 @@
 - Removed CAN hardware dependencies from RV Link (moved to CAN-MQTT Bridge addon)
 - Simplified RV Link to pure orchestrator role
 - CAN-MQTT Bridge configured automatically with RV Link settings
+- Node-RED flows now always pulled from main branch instead of version tags
 
 ### Removed
 - Bundled CAN bridge implementation removed
 - CAN-related system dependencies removed from Dockerfile (can-utils, iproute2)
 - CAN hardware access permissions removed from config.yaml (privileged, devices, kernel_modules, host_network)
+- Backup file creation removed (flows.json.bak and settings.js.bak no longer created)
 
 ## [0.5.3] - 2025-11-20
 

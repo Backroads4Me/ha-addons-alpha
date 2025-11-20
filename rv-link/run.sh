@@ -248,7 +248,7 @@ if is_installed "$SLUG_MOSQUITTO"; then
   fi
 else
   # Mosquitto is NOT installed. Check for conflicts.
-  if bashio::services.available "mqtt"; then
+  if bashio::services.available "mqtt" &>/dev/null; then
     # MQTT service exists. Check if it's provided by Mosquitto that we just haven't detected yet
     # Get the service config to see which addon provides it
     MQTT_SERVICE_INFO=$(bashio::services "mqtt" "host" 2>/dev/null || echo "")
@@ -280,7 +280,7 @@ set_boot_auto "$SLUG_MOSQUITTO" || bashio::log.warning "   ⚠️  Could not set
 bashio::log.info "   📡 Waiting for MQTT service registration..."
 MQTT_SERVICE_AVAILABLE=false
 for i in {1..30}; do
-    if bashio::services.available "mqtt" 2>/dev/null; then
+    if bashio::services.available "mqtt" &>/dev/null; then
         MQTT_SERVICE_AVAILABLE=true
         bashio::log.info "   ✅ MQTT service discovered"
         break
@@ -363,7 +363,7 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
 # Init command to configure settings.js (runs inside Node-RED container at startup)
 # Uses shell tools (sed, grep) that are available in Node-RED container
-SETTINGS_INIT_CMD='[ ! -f /config/settings.js ] && exit 0; cp /config/settings.js /config/settings.js.bak 2>/dev/null || true; grep -q "flowFile:" /config/settings.js || sed -i "s/module.exports = {/module.exports = {\\n    flowFile: \\"\/share\/rv-link\/flows.json\\",/" /config/settings.js; grep -q "contextStorage:" /config/settings.js || sed -i "s/module.exports = {/module.exports = {\\n    contextStorage: { default: \\"memoryOnly\\", memoryOnly: { module: \\"memory\\" }, file: { module: \\"localfilesystem\\" } },/" /config/settings.js; echo "Node-RED configuration complete"'
+SETTINGS_INIT_CMD='[ ! -f /config/settings.js ] && exit 0; grep -q "flowFile:" /config/settings.js || sed -i "s/module.exports = {/module.exports = {\\n    flowFile: \\"\/share\/rv-link\/flows.json\\",/" /config/settings.js; grep -q "contextStorage:" /config/settings.js || sed -i "s/module.exports = {/module.exports = {\\n    contextStorage: { default: \\"memoryOnly\\", memoryOnly: { module: \\"memory\\" }, file: { module: \\"localfilesystem\\" } },/" /config/settings.js; echo "Node-RED configuration complete"'
 
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
@@ -424,8 +424,6 @@ if [ -f "$FLOWS_FILE" ]; then
         log_debug "Skipping flows deployment to preserve user changes"
     else
         bashio::log.info "   🔄 Updating flows with bundled version..."
-        log_debug "Backing up existing flows..."
-        cp "$FLOWS_FILE" "$FLOWS_FILE.bak" 2>/dev/null || true
         log_debug "Copying new flows from $BUNDLED_PROJECT..."
         cp "$BUNDLED_PROJECT/flows.json" "$FLOWS_FILE"
         bashio::log.info "   ✅ Flows deployed (updated)"
