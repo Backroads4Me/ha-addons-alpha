@@ -379,8 +379,7 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
 # Init command to configure settings.js (runs inside Node-RED container at startup)
 # Uses shell tools (sed, grep) that are available in Node-RED container
-SETTINGS_INIT_CMD='[ ! -f /config/settings.js ] && exit 0; grep -q "flowFile:" /config/settings.js || sed -i "s|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    flowFile: \"/share/rv-link/flows.json\",\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|" /config/settings.js; echo "Node-RED configuration complete"'
-
+SETTINGS_INIT_CMD='mkdir -p /config/projects/rv-link-node-red; cp -rf /share/rv-link/. /config/projects/rv-link-node-red/; cp /share/rv-link/flows.json /config/flows.json; [ ! -f /config/settings.js ] && exit 0; grep -q "contextStorage:" /config/settings.js || sed -i "s|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|" /config/settings.js; echo "Node-RED configuration complete"'
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
   NEW_SECRET=$(openssl rand -hex 16)

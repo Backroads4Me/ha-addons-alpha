@@ -1,3 +1,9 @@
+## [0.6.7] - 2025-11-20
+
+### Fixed
+- Updated Node-RED initialization to copy project files to `/config/projects/rv-link-node-red/` to match flow references
+- Ensured `flows.json` is copied to `/config/flows.json` for automatic loading
+
 ## [0.6.6] - 2025-11-20
 
 ### Fixed
