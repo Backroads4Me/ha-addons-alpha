@@ -10,8 +10,7 @@ bashio::log.info "================================================"
 # ========================
 SUPERVISOR="http://supervisor"
 AUTH_HEADER="Authorization: Bearer $SUPERVISOR_TOKEN"
-PROJECT_DIR="/share/node-red-projects"
-PROJECT_NAME="rv-link"
+PROJECT_PATH="/share/rv-link"
 BUNDLED_PROJECT="/opt/rv-link-project"
 
 # Add-on Slugs
@@ -290,10 +289,24 @@ else
   fi
 fi
 
-# Context Storage
+if ! is_running "$SLUG_NODERED"; then
+  start_addon "$SLUG_NODERED" || exit 1
+fi
+
+# Wait for Node-RED to create settings.js
 NODERED_CONFIG_DIR="/addon_configs/$SLUG_NODERED"
 SETTINGS_FILE="$NODERED_CONFIG_DIR/settings.js"
-if [ -d "$NODERED_CONFIG_DIR" ] && [ -f "$SETTINGS_FILE" ]; then
+bashio::log.info "   ⏳ Waiting for Node-RED to initialize..."
+for i in {1..30}; do
+    if [ -f "$SETTINGS_FILE" ]; then
+        bashio::log.info "   ✅ Node-RED settings file created"
+        break
+    fi
+    sleep 1
+done
+
+# Context Storage Configuration
+if [ -f "$SETTINGS_FILE" ]; then
    if ! grep -q "contextStorage" "$SETTINGS_FILE"; then
      bashio::log.info "   📝 Adding context storage configuration..."
      cp "$SETTINGS_FILE" "$SETTINGS_FILE.bak"
@@ -328,28 +341,21 @@ else:
     sys.exit(1)
 "
      if [ $? -eq 0 ]; then
-        bashio::log.info "   ✅ settings.js updated"
+        bashio::log.info "   ✅ settings.js updated with context storage"
      else
         bashio::log.warning "   ⚠️  Failed to update settings.js automatically"
      fi
+   else
+     bashio::log.info "   ✅ Context storage already configured"
    fi
-fi
-
-if ! is_running "$SLUG_NODERED"; then
-  start_addon "$SLUG_NODERED" || exit 1
+else
+   bashio::log.warning "   ⚠️  settings.js not found, skipping context storage config"
 fi
 
 # ========================
 # Phase 2: Deployment
 # ========================
 bashio::log.info "📋 Phase 2: Deploying RV Link Project"
-mkdir -p "$PROJECT_DIR"
-PROJECT_PATH="$PROJECT_DIR/$PROJECT_NAME"
-
-# Always overwrite with bundled version to ensure consistency
-# Or should we respect local changes?
-# User requested "Update this addon -> changes installed".
-# So we should OVERWRITE.
 bashio::log.info "   📦 Installing bundled project to $PROJECT_PATH..."
 log_debug "Removing old project files..."
 rm -rf "$PROJECT_PATH"

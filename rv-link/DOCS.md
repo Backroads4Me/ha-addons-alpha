@@ -188,12 +188,16 @@ You'll see an update notification in Home Assistant when a new version is releas
 
 ## Project Location
 
-The Node-RED project is stored at:
+The RV Link project is stored at:
 ```
-/share/node-red-projects/rv-link/
+/share/rv-link/
 ```
 
-This location is shared between add-ons and persists across restarts.
+This location is:
+- Directly in the `/share` folder for easy visibility
+- Shared between add-ons and persists across restarts
+- Used by Node-RED as an external project
+- Accessible via File Editor or SSH for manual modifications
 
 ## Troubleshooting
 
