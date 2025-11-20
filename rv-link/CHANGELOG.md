@@ -1,3 +1,9 @@
+## [0.4.9] - 2025-11-20
+
+### Fixed
+- Fixed settings.js path from /addon_configs to /root/addon_configs
+- Added diagnostic logging for settings.js file location
+
 ## [0.4.8] - 2025-11-19
 
 ### Changed

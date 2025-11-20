@@ -23,7 +23,7 @@ RUN apk add --no-cache \
 # Bundle the Node-RED Project
 # Pin to specific version for reproducible builds
 # Update PROJECT_VERSION when releasing new versions
-ARG PROJECT_VERSION=v0.4.8
+ARG PROJECT_VERSION=v0.4.9
 RUN git clone --branch ${PROJECT_VERSION} --depth 1 https://github.com/Backroads4Me/rv-link-node-red /opt/rv-link-project || \
     git clone https://github.com/Backroads4Me/rv-link-node-red /opt/rv-link-project
 

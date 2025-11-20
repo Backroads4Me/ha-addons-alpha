@@ -294,9 +294,10 @@ if ! is_running "$SLUG_NODERED"; then
 fi
 
 # Wait for Node-RED to create settings.js
-NODERED_CONFIG_DIR="/addon_configs/$SLUG_NODERED"
+NODERED_CONFIG_DIR="/root/addon_configs/$SLUG_NODERED"
 SETTINGS_FILE="$NODERED_CONFIG_DIR/settings.js"
 bashio::log.info "   ⏳ Waiting for Node-RED to initialize..."
+log_debug "Looking for settings.js at: $SETTINGS_FILE"
 for i in {1..30}; do
     if [ -f "$SETTINGS_FILE" ]; then
         bashio::log.info "   ✅ Node-RED settings file created"
@@ -304,6 +305,12 @@ for i in {1..30}; do
     fi
     sleep 1
 done
+
+# Debug: List what's actually in the directory if file not found
+if [ ! -f "$SETTINGS_FILE" ]; then
+    log_debug "Settings file not found. Directory contents:"
+    log_debug "$(ls -la "$NODERED_CONFIG_DIR" 2>&1 || echo 'Directory does not exist')"
+fi
 
 # Context Storage Configuration
 if [ -f "$SETTINGS_FILE" ]; then
