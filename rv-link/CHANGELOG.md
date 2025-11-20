@@ -1,16 +1,26 @@
-## [0.4.9] - 2025-11-20
+## [0.5.1] - 2025-11-20
 
 ### Fixed
 - Fixed false conflict error when Mosquitto is already installed by checking service hostname
 - Fixed Node-RED takeover permission check being bypassed when is_installed() fails to detect existing installation
-- Fixed settings.js timeout by increasing wait time to 120 seconds with two-stage waiting
-- Enhanced is_installed() function with better error handling and diagnostic logging
+- Fixed is_installed() function to properly detect installed addons by checking version field when installed field is absent
+- Fixed syntax error from using local keyword outside of function
 - Improved error message when Node-RED is already installed to guide users to enable confirm_nodered_takeover setting
 
 ### Changed
-- Changed settings.js context storage configuration to use Node-RED init_commands feature for reliable modification
-- Increased Node-RED initialization wait with progress indicators every 10 seconds
-- Added diagnostic logging for settings.js file detection
+- **BREAKING**: Removed addon_configs mapping as cross-container access is not possible
+- Completely redesigned settings.js configuration to use Python-based init_commands
+- Init command now properly enables projects mode in editorTheme section
+- Init command adds context storage configuration (memory and file)
+- Init command sets projectsDir to /share so Node-RED finds external projects
+- Init command automatically sets rv-link as the active project in projects.json
+- Removed unnecessary 120-second wait for inaccessible settings.js file
+- Simplified startup flow with clearer messaging about init_commands approach
+
+## [0.4.9] - 2025-11-20
+
+### Changed
+- Version skipped due to refactoring
 
 ## [0.4.8] - 2025-11-19
 

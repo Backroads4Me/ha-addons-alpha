@@ -328,7 +328,8 @@ RV Link requires:
 - `hassio_api: true` - To communicate with Supervisor API
 - `hassio_role: manager` - To configure other add-ons (Node-RED)
 - `map: share:rw` - To access shared storage for project files
-- `map: addon_configs:rw` - To modify Node-RED's settings.js file
+
+Note: Node-RED's settings.js is modified using init_commands that run inside the Node-RED container, as direct file access is not possible across containers.
 
 ### API Usage
 

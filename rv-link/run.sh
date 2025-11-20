@@ -72,10 +72,23 @@ is_installed() {
   fi
 
   # Check installation status
-  local installed=$(echo "$response" | jq -r '.data.installed // false')
-  log_debug "$slug installed status: $installed"
+  # If "installed" field exists, use it
+  local installed=$(echo "$response" | jq -r '.data.installed // empty')
+  if [ -n "$installed" ]; then
+    log_debug "$slug explicit installed status: $installed"
+    [ "$installed" == "true" ]
+    return $?
+  fi
 
-  [ "$installed" == "true" ]
+  # If no "installed" field, check if "version" field exists (indicates installed addon)
+  local version=$(echo "$response" | jq -r '.data.version // empty')
+  if [ -n "$version" ]; then
+    log_debug "$slug has version $version, therefore is installed"
+    return 0
+  fi
+
+  log_debug "$slug does not appear to be installed"
+  return 1
 }
 
 is_running() {
@@ -293,8 +306,10 @@ else
   bashio::log.info "   📥 Node-RED not found. Installing..."
   if ! install_addon "$SLUG_NODERED"; then
     # Installation failed - check if it's because it's already installed
-    local nr_check=$(api_call GET "/addons/$SLUG_NODERED/info")
-    if echo "$nr_check" | jq -e '.data.installed == true' >/dev/null 2>&1; then
+    nr_check=$(api_call GET "/addons/$SLUG_NODERED/info")
+    # Check if addon is actually installed (by checking for version field)
+    nr_version=$(echo "$nr_check" | jq -r '.data.version // empty')
+    if [ -n "$nr_version" ]; then
       bashio::log.info "   ℹ️  Node-RED was already installed (detection issue)"
       NODERED_ALREADY_INSTALLED=true
     else
@@ -329,14 +344,93 @@ NR_INFO=$(api_call GET "/addons/$SLUG_NODERED/info")
 NR_OPTIONS=$(echo "$NR_INFO" | jq '.data.options')
 SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
-# Init command to add context storage to settings.js (runs inside Node-RED container)
-# This runs at Node-RED startup and modifies /config/settings.js if contextStorage isn't already present
-CONTEXT_STORAGE_INIT_CMD='if [ -f /config/settings.js ] && ! grep -q "contextStorage" /config/settings.js; then sed -i "s/module.exports = {/module.exports = {\n    contextStorage: { default: \"memoryOnly\", memoryOnly: { module: \"memory\" }, file: { module: \"localfilesystem\" } },/" /config/settings.js; fi'
+# Init command to configure settings.js (runs inside Node-RED container at startup)
+# This modifies /config/settings.js to enable projects, add context storage, and configure project directory
+SETTINGS_INIT_CMD='python3 << "PYEOF"
+import re
+import os
+import json
+
+settings_file = "/config/settings.js"
+if not os.path.exists(settings_file):
+    exit(0)
+
+with open(settings_file, "r") as f:
+    content = f.read()
+
+modified = False
+
+# Enable projects if not already enabled
+if "editorTheme:" not in content or ("editorTheme:" in content and "projects:" not in content):
+    # Add or update editorTheme section
+    if "editorTheme:" in content:
+        # editorTheme exists, add projects to it
+        content = re.sub(
+            r"(editorTheme:\s*{)",
+            r"\1\n        projects: { enabled: true },",
+            content
+        )
+    else:
+        # Add complete editorTheme section
+        content = re.sub(
+            r"(module\.exports\s*=\s*{)",
+            r"\1\n    editorTheme: {\n        projects: { enabled: true }\n    },",
+            content
+        )
+    modified = True
+
+# Add context storage if not present
+if "contextStorage:" not in content:
+    content = re.sub(
+        r"(module\.exports\s*=\s*{)",
+        r"\1\n    contextStorage: {\n        default: \"memoryOnly\",\n        memoryOnly: { module: \"memory\" },\n        file: { module: \"localfilesystem\" }\n    },",
+        content
+    )
+    modified = True
+
+# Configure projects directory to use /share for external projects
+if "projectsDir:" not in content:
+    content = re.sub(
+        r"(module\.exports\s*=\s*{)",
+        r"\1\n    projectsDir: \"/share\",",
+        content
+    )
+    modified = True
+
+# Set active project to rv-link if projects settings file exists
+projects_file = "/config/projects/projects.json"
+if os.path.exists(projects_file):
+    try:
+        with open(projects_file, "r") as f:
+            projects_data = json.load(f)
+
+        # Set rv-link as the active project
+        if projects_data.get("activeProject") != "rv-link":
+            projects_data["activeProject"] = "rv-link"
+
+            # Add rv-link to projects list if not present
+            if "projects" not in projects_data:
+                projects_data["projects"] = {}
+            if "rv-link" not in projects_data["projects"]:
+                projects_data["projects"]["rv-link"] = {}
+
+            with open(projects_file, "w") as f:
+                json.dump(projects_data, f, indent=4)
+            print("Set rv-link as active project")
+    except Exception as e:
+        print(f"Could not update projects.json: {e}")
+
+if modified:
+    with open(settings_file, "w") as f:
+        f.write(content)
+    print("Settings.js updated successfully")
+PYEOF
+'
 
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
   NEW_SECRET=$(openssl rand -hex 16)
-  NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg secret "$NEW_SECRET" --arg initcmd "$CONTEXT_STORAGE_INIT_CMD" '. + {"credential_secret": $secret, "projects": true, "ssl": false, "init_commands": [$initcmd]}')
+  NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg secret "$NEW_SECRET" --arg initcmd "$SETTINGS_INIT_CMD" '. + {"credential_secret": $secret, "ssl": false, "init_commands": [$initcmd]}')
   set_options "$SLUG_NODERED" "$NEW_OPTIONS" || exit 1
 else
   PROJECTS=$(echo "$NR_OPTIONS" | jq -r '.projects')
@@ -354,7 +448,7 @@ else
   fi
 
   if [ "$NEEDS_UPDATE" = "true" ]; then
-    NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg initcmd "$CONTEXT_STORAGE_INIT_CMD" '. + {"projects": true, "init_commands": [$initcmd]}')
+    NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg initcmd "$SETTINGS_INIT_CMD" '. + {"init_commands": [$initcmd]}')
     set_options "$SLUG_NODERED" "$NEW_OPTIONS" || exit 1
   fi
 fi
@@ -363,94 +457,13 @@ if ! is_running "$SLUG_NODERED"; then
   start_addon "$SLUG_NODERED" || exit 1
 fi
 
-# Wait for Node-RED to create settings.js
-NODERED_CONFIG_DIR="/addon_configs/$SLUG_NODERED"
-SETTINGS_FILE="$NODERED_CONFIG_DIR/settings.js"
-bashio::log.info "   ⏳ Waiting for Node-RED to initialize..."
-log_debug "Looking for settings.js at: $SETTINGS_FILE"
-
-# Stage 1: Wait for config directory to be created (up to 60 seconds)
-for i in {1..60}; do
-    if [ -d "$NODERED_CONFIG_DIR" ]; then
-        log_debug "Config directory created after $i seconds"
-        break
-    fi
-    if [ $((i % 10)) -eq 0 ]; then
-        bashio::log.info "   ⏳ Still waiting for Node-RED config directory... (${i}s)"
-    fi
-    sleep 1
-done
-
-# Stage 2: Wait for settings.js to be created (up to 60 more seconds)
-if [ -d "$NODERED_CONFIG_DIR" ]; then
-    for i in {1..60}; do
-        if [ -f "$SETTINGS_FILE" ]; then
-            bashio::log.info "   ✅ Node-RED settings file created"
-            break
-        fi
-        if [ $((i % 10)) -eq 0 ]; then
-            bashio::log.info "   ⏳ Still waiting for settings.js file... (${i}s)"
-        fi
-        sleep 1
-    done
-fi
-
-# Debug: List what's actually in the directory if file not found
-if [ ! -f "$SETTINGS_FILE" ]; then
-    log_debug "Settings file not found after waiting. Directory contents:"
-    if [ -d "$NODERED_CONFIG_DIR" ]; then
-        log_debug "$(ls -la "$NODERED_CONFIG_DIR" 2>&1)"
-    else
-        log_debug "Directory does not exist: $NODERED_CONFIG_DIR"
-    fi
-fi
-
-# Context Storage Configuration
-if [ -f "$SETTINGS_FILE" ]; then
-   if ! grep -q "contextStorage" "$SETTINGS_FILE"; then
-     bashio::log.info "   📝 Adding context storage configuration..."
-     cp "$SETTINGS_FILE" "$SETTINGS_FILE.bak"
-
-     # Use Python for robust file editing
-     python3 -c "
-import sys
-import re
-
-file_path = '$SETTINGS_FILE'
-with open(file_path, 'r') as f:
-    content = f.read()
-
-# Config to insert
-config = '''
-    contextStorage: {
-        default: 'memoryOnly',
-        memoryOnly: { module: 'memory' },
-        file: { module: 'localfilesystem' }
-    },
-'''
-
-# Find the last closing brace
-match = re.search(r'}(\s*;?\s*)$', content)
-if match:
-    # Insert before the last brace
-    new_content = content[:match.start()] + config + content[match.start():]
-    with open(file_path, 'w') as f:
-        f.write(new_content)
-else:
-    print('Could not find closing brace in settings.js', file=sys.stderr)
-    sys.exit(1)
-"
-     if [ $? -eq 0 ]; then
-        bashio::log.info "   ✅ settings.js updated with context storage"
-     else
-        bashio::log.warning "   ⚠️  Failed to update settings.js automatically"
-     fi
-   else
-     bashio::log.info "   ✅ Context storage already configured"
-   fi
-else
-   bashio::log.warning "   ⚠️  settings.js not found, skipping context storage config"
-fi
+# Settings.js Configuration
+# Note: We cannot directly access Node-RED's settings.js from this container.
+# Instead, we use init_commands (configured above) which run inside the Node-RED container.
+bashio::log.info "   📝 Settings.js will be configured via init_commands on Node-RED startup"
+log_debug "Current working directory: $(pwd)"
+log_debug "Root directory accessible paths: $(ls -la / | grep -E 'addon|config|share' || echo 'No matching directories')"
+bashio::log.info "   ℹ️  Projects and context storage will be enabled automatically"
 
 # ========================
 # Phase 2: Deployment
