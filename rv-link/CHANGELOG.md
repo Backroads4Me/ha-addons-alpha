@@ -1,3 +1,22 @@
+## [0.6.11] - 2025-11-20
+
+### Added
+- Injected `MQTT_USER` and `MQTT_PASS` as environment variables into Node-RED container
+- Enables using `${MQTT_USER}` and `${MQTT_PASS}` in Node-RED flows for dynamic credential configuration
+
+## [0.6.10] - 2025-11-20
+
+### Fixed
+- Automatically configures `core_mosquitto` with default user `rvlink` (password: `One23four`) if no MQTT credentials are provided
+- Ensures seamless connection for CAN-MQTT Bridge and Node-RED without manual user creation
+
+## [0.6.9] - 2025-11-20
+
+### Fixed
+- Implemented automatic restart of Node-RED when configuration/flows are updated
+- Added copying of `flows_cred.json` to preserve credentials if present in bundle
+- Cleaned up debug logging from initialization process
+
 ## [0.6.8] - 2025-11-20
 
 ### Fixed

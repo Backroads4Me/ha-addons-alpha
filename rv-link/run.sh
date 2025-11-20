@@ -379,7 +379,14 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
 # Init command to configure settings.js (runs inside Node-RED container at startup)
 # Uses shell tools (sed, grep) that are available in Node-RED container
-SETTINGS_INIT_CMD='echo "Starting Init..." > /share/rv-link/init_debug.log; mkdir -p /config/projects/rv-link-node-red; cp -v -rf /share/rv-link/. /config/projects/rv-link-node-red/ >> /share/rv-link/init_debug.log 2>&1; echo "Copying flows..." >> /share/rv-link/init_debug.log; cp -vf /share/rv-link/flows.json /config/flows.json >> /share/rv-link/init_debug.log 2>&1; echo "Listing /config/flows.json:" >> /share/rv-link/init_debug.log; ls -la /config/flows.json >> /share/rv-link/init_debug.log 2>&1; [ ! -f /config/settings.js ] && exit 0; grep -q "contextStorage:" /config/settings.js || sed -i "s|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|" /config/settings.js; echo "Node-RED configuration complete" >> /share/rv-link/init_debug.log'
+# We inject MQTT credentials as environment variables so they can be used in flows as ${MQTT_USER} and ${MQTT_PASS}
+# Note: We use /etc/profile.d to ensure they persist, or just export them if init_commands runs in the same shell as startup.
+# The official Node-RED addon executes init_commands then starts Node-RED, so exports *should* work if it's a sourced script.
+# However, to be safe, we can also write them to a file that Node-RED might source, or just rely on the fact that init_commands are usually eval'd.
+# Best bet: export them in the command string.
+# We inject MQTT credentials directly into settings.js so they are available in Node-RED's process.env
+# This allows using ${MQTT_USER} and ${MQTT_PASS} in flows.
+SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/rv-link/. /config/projects/rv-link-node-red/; cp -vf /share/rv-link/flows.json /config/flows.json; cp -vf /share/rv-link/flows_cred.json /config/flows_cred.json; [ ! -f /config/settings.js ] && exit 0; sed -i \"1i process.env.MQTT_USER = '${MQTT_USER}'; process.env.MQTT_PASS = '${MQTT_PASS}';\" /config/settings.js; grep -q \"contextStorage:\" /config/settings.js || sed -i \"s|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \\\"memory\\\", memory: { module: \\\"memory\\\" }, file: { module: \\\"localfilesystem\\\" } },|\" /config/settings.js; echo \"Node-RED configuration complete\""
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
   NEW_SECRET=$(openssl rand -hex 16)
@@ -417,6 +424,42 @@ bashio::log.info "   ℹ️  Flow file path will be configured automatically"
 # Phase 3: CAN-MQTT Bridge
 # ========================
 bashio::log.info "📋 Phase 3: Installing CAN-MQTT Bridge"
+
+# ========================
+# 1. Start Mosquitto
+# ========================
+if ! is_installed "$SLUG_MOSQUITTO"; then
+    bashio::log.info "   🔽 Installing Mosquitto broker..."
+    if ! install_addon "$SLUG_MOSQUITTO"; then
+        bashio::log.fatal "❌ Failed to install Mosquitto broker"
+        exit 1
+    fi
+else
+    bashio::log.info "   ✅ Mosquitto broker already installed"
+fi
+
+# Configure Mosquitto User if needed
+if [ -z "$MQTT_USER" ]; then
+    bashio::log.info "   ⚙️  No MQTT user provided. Configuring default 'rvlink' user..."
+    MQTT_USER="rvlink"
+    MQTT_PASS="One23four"
+    
+    # Create user in Mosquitto options
+    MOSQUITTO_OPTIONS=$(api_call GET "/addons/$SLUG_MOSQUITTO/options" | jq '.data.options')
+    
+    # Check if user already exists in logins to avoid duplicates/overwrites if possible, 
+    # but for now we enforce our user to ensure it works.
+    # We append to existing logins or create new list.
+    NEW_MOSQUITTO_OPTIONS=$(echo "$MOSQUITTO_OPTIONS" | jq --arg user "$MQTT_USER" --arg pass "$MQTT_PASS" '
+        .logins |= (map(select(.username != $user)) + [{"username": $user, "password": $pass}])
+    ')
+    
+    api_call POST "/addons/$SLUG_MOSQUITTO/options" "$NEW_MOSQUITTO_OPTIONS" > /dev/null
+    bashio::log.info "   ✅ Configured Mosquitto user: $MQTT_USER"
+fi
+
+start_addon "$SLUG_MOSQUITTO" || exit 1
+wait_for_mqtt "core-mosquitto" 1883 "$MQTT_USER" "$MQTT_PASS" || exit 1
 
 # Check if CAN-MQTT Bridge is installed
 if ! is_installed "$SLUG_CAN_BRIDGE"; then
