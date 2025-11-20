@@ -1,3 +1,27 @@
+## [0.6.17] - 2025-11-20
+
+### Fixed
+- MQTT credential consistency issue resolved by always creating rvlink user in Mosquitto
+- Both Node-RED and CAN-MQTT Bridge now use the same rvlink credentials regardless of service discovery
+
+## [0.6.16] - 2025-11-20
+
+### Fixed
+- MQTT credentials now properly injected into mqtt-broker configuration node using jq
+- Node-RED will automatically encrypt credentials into flows_cred.json on first load
+
+## [0.6.15] - 2025-11-20
+
+### Changed
+- Cleaned up debug logging and diagnostic code left from development
+- Re-enabled debug_logging config option instead of forcing debug mode
+
+## [0.6.14] - 2025-11-20
+
+### Fixed
+- Node-RED flows now appear immediately without requiring manual restart by automatically restarting Node-RED when init commands are updated
+- MQTT broker configuration node credentials now properly set to rvlink/One23four via direct injection into flows.json
+
 ## [0.6.13] - 2025-11-20
 
 ### Fixed
