@@ -386,7 +386,9 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 # Best bet: export them in the command string.
 # We inject MQTT credentials directly into settings.js so they are available in Node-RED's process.env
 # This allows using ${MQTT_USER} and ${MQTT_PASS} in flows.
-SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/rv-link/. /config/projects/rv-link-node-red/; cp -vf /share/rv-link/flows.json /config/flows.json; cp -vf /share/rv-link/flows_cred.json /config/flows_cred.json; [ ! -f /config/settings.js ] && exit 0; sed -i \"1i process.env.MQTT_USER = '${MQTT_USER}'; process.env.MQTT_PASS = '${MQTT_PASS}';\" /config/settings.js; grep -q \"contextStorage:\" /config/settings.js || sed -i \"s|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \\\"memory\\\", memory: { module: \\\"memory\\\" }, file: { module: \\\"localfilesystem\\\" } },|\" /config/settings.js; echo \"Node-RED configuration complete\""
+# We inject MQTT credentials directly into settings.js so they are available in Node-RED's process.env
+# This allows using ${MQTT_USER} and ${MQTT_PASS} in flows.
+SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/rv-link/. /config/projects/rv-link-node-red/; cp -vf /share/rv-link/flows.json /config/flows.json; [ ! -f /config/settings.js ] && exit 0; sed -i \"1i process.env.MQTT_USER = '${MQTT_USER}'; process.env.MQTT_PASS = '${MQTT_PASS}';\" /config/settings.js; grep -q \"contextStorage:\" /config/settings.js || sed -i \"s|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \\\"memory\\\", memory: { module: \\\"memory\\\" }, file: { module: \\\"localfilesystem\\\" } },|\" /config/settings.js; echo \"Node-RED configuration complete\""
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
   NEW_SECRET=$(openssl rand -hex 16)

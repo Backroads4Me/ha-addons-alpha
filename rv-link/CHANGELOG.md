@@ -1,3 +1,14 @@
+## [0.6.13] - 2025-11-20
+
+### Fixed
+- Ensured CAN-MQTT Bridge receives the correct auto-generated MQTT password
+
+## [0.6.12] - 2025-11-20
+
+### Fixed
+- Removed copying of `flows_cred.json` to prevent encryption key errors
+- Now relying fully on injected environment variables for MQTT credentials
+
 ## [0.6.11] - 2025-11-20
 
 ### Added
