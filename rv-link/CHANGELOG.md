@@ -1,3 +1,16 @@
+## [0.6.38] - 2025-11-20
+
+### Changed
+- Docker build now explicitly removes `.gitignore`, `.gitattributes`, and `flows_cred.json` from the bundled project.
+- Ensures a cleaner deployment without unnecessary version control files or stale credentials.
+
+## [0.6.37] - 2025-11-20
+
+### Fixed
+- Fixed Node-RED API authentication failure (401 Unauthorized) by injecting `adminAuth` configuration to allow anonymous access.
+- This ensures `rv-link` can successfully check status and deploy flows without manual login.
+- Updated Node-RED flow configuration to use the configured `mqtt_user` and `mqtt_pass` instead of hardcoded defaults.
+
 ## [0.6.36] - 2025-11-20
 
 ### Fixed
