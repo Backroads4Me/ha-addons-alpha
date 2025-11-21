@@ -1,3 +1,16 @@
+## [0.6.36] - 2025-11-20
+
+### Fixed
+- Fixed debug logging in Node-RED detection to correctly capture `curl` error messages (was suppressed by `-s` flag).
+- Now uses `curl -sS` (or `-v` in debug mode) to ensure connection errors are visible in logs.
+
+## [0.6.35] - 2025-11-20
+
+### Changed
+- Refactored MQTT configuration: `mqtt_host` and `mqtt_port` removed from options (now internal defaults).
+- `mqtt_user` and `mqtt_pass` are now configurable options with default values ("rvlink"/"One23four").
+- Updated `run.sh` to use the configured MQTT credentials.
+
 ## [0.6.34] - 2025-11-20
 
 ### Changed

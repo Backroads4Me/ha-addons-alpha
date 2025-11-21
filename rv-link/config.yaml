@@ -1,8 +1,8 @@
 # Home Assistant add-on: RV Link
 name: "RV Link"
-version: "0.6.34"
+version: "0.6.36"
 slug: "rv-link"
-description: "RV Link orchestrator: Installs and configures Mosquitto, Node-RED, and CAN-MQTT Bridge for complete RV control."
+description: "RV Link: Installs and configures Mosquitto, Node-RED, and CAN-MQTT Bridge for complete RV control."
 url: "https://github.com/Backroads4Me/ha-addons"
 maintainer: "Ted Lanham <tedlanham@gmail.com>"
 arch:
@@ -22,10 +22,8 @@ map:
 options:
   can_interface: "can0"
   can_bitrate: "250000"
-  mqtt_host: "core-mosquitto"
-  mqtt_port: 1883
-  mqtt_user: ""
-  mqtt_pass: ""
+  mqtt_user: "rvlink"
+  mqtt_pass: "One23four"
   mqtt_topic_raw: "can/raw"
   mqtt_topic_send: "can/send"
   mqtt_topic_status: "can/status"
@@ -34,10 +32,8 @@ options:
 schema:
   can_interface: str
   can_bitrate: list(125000|250000|500000|1000000)
-  mqtt_host: str
-  mqtt_port: port
-  mqtt_user: str?
-  mqtt_pass: password?
+  mqtt_user: str
+  mqtt_pass: password
   mqtt_topic_raw: str
   mqtt_topic_send: str
   mqtt_topic_status: str

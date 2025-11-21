@@ -28,6 +28,8 @@ CAN_BITRATE=$(bashio::config 'can_bitrate')
 MQTT_TOPIC_RAW=$(bashio::config 'mqtt_topic_raw')
 MQTT_TOPIC_SEND=$(bashio::config 'mqtt_topic_send')
 MQTT_TOPIC_STATUS=$(bashio::config 'mqtt_topic_status')
+MQTT_USER=$(bashio::config 'mqtt_user')
+MQTT_PASS=$(bashio::config 'mqtt_pass')
 DEBUG_LOGGING=$(bashio::config 'debug_logging')
 
 # ========================
@@ -240,16 +242,25 @@ wait_for_nodered_api() {
       
       # Capture output/error to debug
       local output
-      if output=$(curl -s -f -m 2 "$url" 2>&1); then
-        bashio::log.info "   ✅ Node-RED API is ready at $url"
-        # Store the working host for deploy function
-        echo "$host" > /tmp/nodered_host
-        return 0
+      # Use -S to show errors even with -s (silent mode)
+      # Use -v (verbose) if debug logging is enabled for maximum detail
+      if [ "$DEBUG_LOGGING" = "true" ]; then
+          if output=$(curl -v -sS -f -m 2 "$url" 2>&1); then
+            bashio::log.info "   ✅ Node-RED API is ready at $url"
+            echo "$host" > /tmp/nodered_host
+            return 0
+          fi
       else
-        # Only log detailed error if debug logging is on OR if we are running out of retries (e.g. last 5)
-        if [ "$DEBUG_LOGGING" = "true" ] || [ $retries -le 5 ]; then
-             bashio::log.warning "   [DEBUG] Connection to $url failed: $output"
-        fi
+          if output=$(curl -sS -f -m 2 "$url" 2>&1); then
+            bashio::log.info "   ✅ Node-RED API is ready at $url"
+            echo "$host" > /tmp/nodered_host
+            return 0
+          fi
+      fi
+
+      # Only log detailed error if debug logging is on OR if we are running out of retries (e.g. last 5)
+      if [ "$DEBUG_LOGGING" = "true" ] || [ $retries -le 5 ]; then
+           bashio::log.warning "   [DEBUG] Connection to $url failed: $output"
       fi
     done
     
@@ -374,8 +385,7 @@ set_boot_auto "$SLUG_MOSQUITTO" || bashio::log.warning "   ⚠️  Could not set
 # Always ensure rvlink user exists in Mosquitto for consistency
 # Both Node-RED and CAN-MQTT Bridge will use these credentials
 bashio::log.info "   ⚙️  Ensuring 'rvlink' user exists in Mosquitto..."
-MQTT_USER="rvlink"
-MQTT_PASS="One23four"
+# MQTT_USER and MQTT_PASS are read from config at the top
 MQTT_HOST="core-mosquitto"
 MQTT_PORT=1883
 
