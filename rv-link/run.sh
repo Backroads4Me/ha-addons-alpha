@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.19"
+ADDON_VERSION="0.6.20"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -458,20 +458,9 @@ NR_INFO=$(api_call GET "/addons/$SLUG_NODERED/info")
 NR_OPTIONS=$(echo "$NR_INFO" | jq '.data.options')
 SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
-# Init command using here-document for clean escaping
-SETTINGS_INIT_CMD=$(cat <<'INITEOF'
-mkdir -p /config/projects/rv-link-node-red
-cp -rf /share/rv-link/. /config/projects/rv-link-node-red/
-cp -vf /share/rv-link/flows.json /config/flows.json
-jq --arg user "rvlink" --arg pass "One23four" 'map(if .id == "80727e60a251c36c" then . + {credentials: {user: $user, password: $pass}} else . end)' /config/flows.json > /config/flows.json.tmp && mv /config/flows.json.tmp /config/flows.json
-if [ -f /config/settings.js ]; then
-  if ! grep -q "contextStorage:" /config/settings.js; then
-    sed -i "s|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|" /config/settings.js
-  fi
-fi
-echo "Node-RED configuration complete"
-INITEOF
-)
+# Init command - single line with proper escaping for Node-RED's eval
+# Commands are chained with && and ; for proper execution
+SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/rv-link/. /config/projects/rv-link-node-red/; cp -vf /share/rv-link/flows.json /config/flows.json; jq --arg user 'rvlink' --arg pass 'One23four' 'map(if .id == \"80727e60a251c36c\" then . + {credentials: {user: \$user, password: \$pass}} else . end)' /config/flows.json > /config/flows.json.tmp && mv /config/flows.json.tmp /config/flows.json; if [ -f /config/settings.js ]; then grep -q 'contextStorage:' /config/settings.js || sed -i 's|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|' /config/settings.js; fi; echo 'Node-RED configuration complete'"
 
 NEEDS_RESTART=false
 

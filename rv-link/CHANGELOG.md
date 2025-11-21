@@ -1,3 +1,8 @@
+## [0.6.20] - 2025-11-20
+
+### Fixed
+- Node-RED init command converted to single-line format to prevent eval syntax errors
+
 ## [0.6.19] - 2025-11-20
 
 ### Added
