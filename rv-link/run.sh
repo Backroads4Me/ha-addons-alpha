@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.33"
+ADDON_VERSION="0.6.39"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -393,9 +393,16 @@ MQTT_PORT=1883
 MOSQUITTO_OPTIONS=$(api_call GET "/addons/$SLUG_MOSQUITTO/info" | jq '.data.options')
 
 # Remove existing rvlink user if present, then add it with current password
+# Handle case where logins might be null
 NEW_MOSQUITTO_OPTIONS=$(echo "$MOSQUITTO_OPTIONS" | jq --arg user "$MQTT_USER" --arg pass "$MQTT_PASS" '
+    .logins = (.logins // []) | 
     .logins |= (map(select(.username != $user)) + [{"username": $user, "password": $pass}])
 ')
+
+if [ -z "$NEW_MOSQUITTO_OPTIONS" ] || [ "$NEW_MOSQUITTO_OPTIONS" == "null" ]; then
+    bashio::log.error "   ❌ Failed to generate Mosquitto configuration"
+    exit 1
+fi
 
 api_call POST "/addons/$SLUG_MOSQUITTO/options" "{\"options\": $NEW_MOSQUITTO_OPTIONS}" > /dev/null
 bashio::log.info "   ✅ Configured Mosquitto user: $MQTT_USER"
@@ -430,23 +437,33 @@ fi
 
 # Configure CAN-MQTT Bridge with our settings
 bashio::log.info "   ⚙️  Configuring CAN-MQTT Bridge..."
-CAN_BRIDGE_CONFIG=$(cat <<EOF
-{
-  "options": {
-    "can_interface": "$CAN_INTERFACE",
-    "can_bitrate": "$CAN_BITRATE",
-    "mqtt_host": "$MQTT_HOST",
-    "mqtt_port": $MQTT_PORT,
-    "mqtt_user": "$MQTT_USER",
-    "mqtt_pass": "$MQTT_PASS",
-    "mqtt_topic_raw": "$MQTT_TOPIC_RAW",
-    "mqtt_topic_send": "$MQTT_TOPIC_SEND",
-    "mqtt_topic_status": "$MQTT_TOPIC_STATUS",
-    "debug_logging": false,
-    "ssl": false
-  }
-}
-EOF
+
+# Use jq to safely construct the JSON, handling special characters in passwords
+CAN_BRIDGE_CONFIG=$(jq -n \
+  --arg can_interface "$CAN_INTERFACE" \
+  --arg can_bitrate "$CAN_BITRATE" \
+  --arg mqtt_host "$MQTT_HOST" \
+  --argjson mqtt_port "$MQTT_PORT" \
+  --arg mqtt_user "$MQTT_USER" \
+  --arg mqtt_pass "$MQTT_PASS" \
+  --arg mqtt_topic_raw "$MQTT_TOPIC_RAW" \
+  --arg mqtt_topic_send "$MQTT_TOPIC_SEND" \
+  --arg mqtt_topic_status "$MQTT_TOPIC_STATUS" \
+  '{
+    "options": {
+      "can_interface": $can_interface,
+      "can_bitrate": $can_bitrate,
+      "mqtt_host": $mqtt_host,
+      "mqtt_port": $mqtt_port,
+      "mqtt_user": $mqtt_user,
+      "mqtt_pass": $mqtt_pass,
+      "mqtt_topic_raw": $mqtt_topic_raw,
+      "mqtt_topic_send": $mqtt_topic_send,
+      "mqtt_topic_status": $mqtt_topic_status,
+      "debug_logging": false,
+      "ssl": false
+    }
+  }'
 )
 
 result=$(api_call POST "/addons/$SLUG_CAN_BRIDGE/options" "$CAN_BRIDGE_CONFIG")
@@ -532,7 +549,7 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
 # Init command - Point Node-RED to project directory instead of copying flows
 # This keeps all files in one place and avoids duplication
-SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/.rv-link/. /config/projects/rv-link-node-red/; rm -f /config/projects/rv-link-node-red/flows_cred.json; jq --arg user '$MQTT_USER' --arg pass '$MQTT_PASS' 'map(if .id == \"80727e60a251c36c\" then . + {credentials: {user: \$user, password: \$pass}} else . end)' /config/projects/rv-link-node-red/flows.json > /config/projects/rv-link-node-red/flows.json.tmp && mv /config/projects/rv-link-node-red/flows.json.tmp /config/projects/rv-link-node-red/flows.json; if [ -f /config/settings.js ]; then sed -i \"s|flowFile:.*|flowFile: 'projects/rv-link-node-red/flows.json',|\" /config/settings.js; grep -q 'adminAuth:' /config/settings.js || sed -i 's|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    adminAuth: { type: \"credentials\", users: [], default: { permissions: \"*\" } },|' /config/settings.js; grep -q 'contextStorage:' /config/settings.js || sed -i 's|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|' /config/settings.js; fi; echo 'Node-RED configuration complete'"
+SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/.rv-link/. /config/projects/rv-link-node-red/; rm -f /config/projects/rv-link-node-red/flows_cred.json; jq --arg user '$MQTT_USER' --arg pass '$MQTT_PASS' 'map(if .id == \"80727e60a251c36c\" then . + {credentials: {user: \$user, password: \$pass}} else . end)' /config/projects/rv-link-node-red/flows.json > /config/projects/rv-link-node-red/flows.json.tmp && mv /config/projects/rv-link-node-red/flows.json.tmp /config/projects/rv-link-node-red/flows.json; if [ -f /config/settings.js ]; then sed -i \"s|flowFile:.*|flowFile: 'projects/rv-link-node-red/flows.json',|\" /config/settings.js; grep -q 'adminAuth:' /config/settings.js || sed -i 's|module.exports.*=.*{|module.exports = {\\n    adminAuth: { type: \"credentials\", users: [], default: { permissions: \"*\" } },|' /config/settings.js; grep -q 'contextStorage:' /config/settings.js || sed -i 's|module.exports.*=.*{|module.exports = {\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|' /config/settings.js; fi; echo 'Node-RED configuration complete'"
 
 NEEDS_RESTART=false
 
