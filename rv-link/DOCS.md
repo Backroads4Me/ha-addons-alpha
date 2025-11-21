@@ -88,27 +88,6 @@ Safety switch to prevent accidental overwriting of existing Node-RED flows.
 confirm_nodered_takeover: true
 ```
 
-### `preserve_project_customizations`
-
-**Type**: Boolean
-**Default**: `false`
-
-Controls whether the RV Link project in `/share/rv-link` is preserved or updated on addon restart.
-
-- `false` (default): Updates the project with bundled version on every restart (recommended for most users)
-- `true`: Preserves existing project, allowing you to make custom modifications without losing them
-- First-time installation always deploys the project regardless of this setting
-
-**Use cases**:
-- Leave as `false` to always get the latest flows when updating the addon
-- Set to `true` if you've customized the Node-RED flows and want to keep your changes
-- Toggle back to `false` temporarily if you want to reset to the default flows
-
-**Example**:
-```yaml
-preserve_project_customizations: true
-```
-
 ### MQTT Settings
 
 Advanced users can override auto-discovered MQTT settings:
@@ -185,10 +164,10 @@ You'll see an update notification in Home Assistant when a new version is releas
 ### What Gets Updated
 
 - Add-on code and dependencies
-- Bundled Node-RED flows (replaced by default, unless preserve_project_customizations is enabled)
+- Bundled Node-RED flows
 - CAN bridge improvements
 
-**Important**: By default, updating replaces the flows with the bundled version. If you've customized flows, enable `preserve_project_customizations: true` in configuration to keep your changes.
+**Important**: Updating RV Link always replaces the flows with the bundled version. RV Link manages the Node-RED flows automatically.
 
 ## Project Location
 
@@ -274,15 +253,21 @@ This location is:
 
 ## Advanced Usage
 
-### Using a Custom Fork
+### Using Node-RED Independently
 
-To use your own fork of the RV Link project:
+If you want to use Node-RED without RV Link management:
 
-1. Fork https://github.com/Backroads4Me/rv-link-node-red
-2. Make your modifications
-3. Update the `PROJECT_REPO` variable in the RV Link add-on's `run.sh` file to point to your fork
+1. Uninstall the RV Link add-on
+2. Go to Node-RED add-on Configuration tab
+3. Click "Edit in YAML"
+4. Find the `init_commands:` section and replace it with:
+   ```yaml
+   init_commands: []
+   ```
+   Or delete the entire `init_commands:` section
+5. Save and restart Node-RED
 
-**Note**: This requires modifying the add-on itself and is intended for advanced users only.
+This removes RV Link's automatic flow deployment and lets you use Node-RED independently.
 
 ## Logs
 
@@ -360,13 +345,7 @@ Note: This uses Node-RED's flowFile setting rather than projects mode, simplifyi
 ## FAQ
 
 **Q: Can I modify the flows after deployment?**
-A: Yes! Set `preserve_project_customizations: true` to preserve your local changes during updates.
+A: You can modify flows in the Node-RED UI, but changes will be overwritten when RV Link updates. To use your own flows permanently, see "Using Node-RED Independently" in the Advanced Usage section.
 
-**Q: How do I edit the flows?**
-A: Open Node-RED via the sidebar, or edit `/share/rv-link/flows.json` directly via File Editor or SSH.
-
-**Q: How do I contribute flows?**
-A: Fork the flows repository at https://github.com/Backroads4Me/rv-link-node-red, make changes, and submit a pull request.
-
-**Q: What if I don't want automatic flow updates?**
-A: Enable `preserve_project_customizations: true` in configuration. Your flows will remain unchanged during addon updates.
+**Q: How do I contribute flow improvements?**
+A: Submit issues or pull requests to the flows repository at https://github.com/Backroads4Me/rv-link-node-red.

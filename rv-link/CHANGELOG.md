@@ -1,3 +1,41 @@
+## [0.6.25] - 2025-11-20
+
+### Changed
+- Simplified customization documentation - users can now easily disable RV Link management by clearing init_commands
+- Removed complex fork workflow from documentation in favor of simple YAML edit
+
+## [0.6.24] - 2025-11-20
+
+### Changed
+- Replaced rocket emoji with RV truck emoji in success messages
+- Updated final success message to direct users to Overview Dashboard and rvlink.app
+- Removed Node-RED UI access instruction from final message
+
+### Fixed
+- Addon now properly exits with failure (exit 1) when Node-RED fails to start or deploy
+- Success status only shown when all critical components are verified working
+- Better error reporting for deployment failures
+
+## [0.6.23] - 2025-11-20
+
+### Removed
+- Removed `preserve_project_customizations` configuration option
+- RV Link now always manages and updates Node-RED flows automatically
+
+### Changed
+- Simplified file deployment logic - always deploys latest bundled flows
+- Updated documentation to clarify that flow customizations should be done via repository fork
+
+## [0.6.22] - 2025-11-20
+
+### Changed
+- Node-RED API detection now tries multiple hostnames for better Docker network compatibility
+- Added verification that Node-RED reaches 'started' state before API access attempts
+
+### Fixed
+- Node-RED API connection failures due to Docker networking resolved by trying multiple hosts
+- Better error messages when Node-RED API is unreachable
+
 ## [0.6.21] - 2025-11-20
 
 ### Added

@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.21"
+ADDON_VERSION="0.6.25"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -226,29 +226,49 @@ wait_for_mqtt() {
 wait_for_nodered_api() {
   bashio::log.info "   > Waiting for Node-RED API to be ready..."
   
+  # Try different hostnames for Node-RED access
+  local hosts=("a0d7b954-nodered" "172.30.32.1" "homeassistant.local")
+  local port=1880
   local retries=60
+  
   while [ $retries -gt 0 ]; do
-    # Try to reach Node-RED admin API (runs on port 1880 in the addon)
-    if curl -s -f -m 2 "http://a0d7b954-nodered:1880/" >/dev/null 2>&1; then
-      bashio::log.info "   ✅ Node-RED API is ready"
-      return 0
-    fi
+    for host in "${hosts[@]}"; do
+      local url="http://${host}:${port}/"
+      if [ "$DEBUG_LOGGING" = "true" ]; then
+        bashio::log.info "   [DEBUG] Trying $url"
+      fi
+      
+      if curl -s -f -m 2 "$url" >/dev/null 2>&1; then
+        bashio::log.info "   ✅ Node-RED API is ready at $url"
+        # Store the working host for deploy function
+        echo "$host" > /tmp/nodered_host
+        return 0
+      fi
+    done
+    
     sleep 2
     ((retries--))
   done
   
-  bashio::log.error "   ❌ Node-RED API not responding"
+  bashio::log.error "   ❌ Node-RED API not responding on any known host"
   return 1
 }
 
 deploy_nodered_flows() {
   bashio::log.info "   > Triggering Node-RED flow deployment..."
   
+  # Get the working host from detection
+  local host="a0d7b954-nodered"
+  if [ -f /tmp/nodered_host ]; then
+    host=$(cat /tmp/nodered_host)
+  fi
+  local base_url="http://${host}:1880"
+  
   # Get current flows from Node-RED
-  local flows=$(curl -s -f -m 5 "http://a0d7b954-nodered:1880/flows" 2>/dev/null)
+  local flows=$(curl -s -f -m 5 "${base_url}/flows" 2>/dev/null)
   
   if [ -z "$flows" ] || ! echo "$flows" | jq -e '.' >/dev/null 2>&1; then
-    bashio::log.error "   ❌ Failed to fetch flows from Node-RED"
+    bashio::log.error "   ❌ Failed to fetch flows from Node-RED at ${base_url}"
     return 1
   fi
   
@@ -257,7 +277,7 @@ deploy_nodered_flows() {
     -H "Content-Type: application/json" \
     -H "Node-RED-Deployment-Type: full" \
     -d "$flows" \
-    "http://a0d7b954-nodered:1880/flows" 2>/dev/null)
+    "${base_url}/flows" 2>/dev/null)
   
   if [ $? -eq 0 ]; then
     bashio::log.info "   ✅ Node-RED flows deployed (credentials encrypted)"
@@ -305,31 +325,21 @@ get_managed_version() {
 # ========================
 bashio::log.info "📋 Phase 0: Deploying Files"
 
-PRESERVE_CUSTOMIZATIONS=$(bashio::config 'preserve_project_customizations')
-
 # Ensure directory exists
 mkdir -p "$PROJECT_PATH"
 
-# Check if project directory is populated
+# Always deploy/update project files from bundled version
 if [ "$(ls -A $PROJECT_PATH)" ]; then
-    if [ "$PRESERVE_CUSTOMIZATIONS" = "true" ]; then
-        bashio::log.info "   ℹ️  Project files found at $PROJECT_PATH"
-        bashio::log.info "   ℹ️  Preserving customizations (set preserve_project_customizations=false to update)"
-    else
-        bashio::log.info "   🔄 Updating project with bundled version..."
-        # Sync all files, deleting extraneous ones in destination
-        rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
-        # Ensure permissions are open (Node-RED runs as non-root)
-        chmod -R 777 "$PROJECT_PATH"
-        bashio::log.info "   ✅ Project files deployed (updated)"
-    fi
+    bashio::log.info "   🔄 Updating project files from bundled version..."
 else
-    bashio::log.info "   📦 Installing bundled project to $PROJECT_PATH..."
-    rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
-    # Ensure permissions are open (Node-RED runs as non-root)
-    chmod -R 777 "$PROJECT_PATH"
-    bashio::log.info "   ✅ Project files deployed (first install)"
+    bashio::log.info "   📦 Deploying bundled project to $PROJECT_PATH..."
 fi
+
+# Sync all files, deleting extraneous ones in destination
+rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
+# Ensure permissions are open (Node-RED runs as non-root)
+chmod -R 777 "$PROJECT_PATH"
+bashio::log.info "   ✅ Project files deployed"
 
 
 # ========================
@@ -549,33 +559,78 @@ fi
 # Ensure Node-RED starts on boot
 set_boot_auto "$SLUG_NODERED" || bashio::log.warning "   ⚠️  Could not set Node-RED to auto-start"
 
-# Wait for Node-RED HTTP API and deploy flows to activate credentials
-# This encrypts the plaintext credentials from flows.json into flows_cred.json
-if wait_for_nodered_api; then
-  deploy_nodered_flows || bashio::log.warning "   ⚠️  Auto-deployment failed, you may need to manually deploy flows in Node-RED UI"
+# Track deployment success for final status
+DEPLOYMENT_SUCCESSFUL=true
+
+# Verify Node-RED is actually running before attempting API access
+bashio::log.info "   > Verifying Node-RED is running..."
+local nr_retries=30
+while [ $nr_retries -gt 0 ]; do
+  if is_running "$SLUG_NODERED"; then
+    bashio::log.info "   ✅ Node-RED is in 'started' state"
+    break
+  fi
+  bashio::log.info "   > Waiting for Node-RED to reach 'started' state... ($nr_retries retries left)"
+  sleep 2
+  ((nr_retries--))
+done
+
+if ! is_running "$SLUG_NODERED"; then
+  bashio::log.error "   ❌ Node-RED failed to reach 'started' state"
+  bashio::log.error "   ❌ RV Link installation FAILED"
+  DEPLOYMENT_SUCCESSFUL=false
 else
-  bashio::log.warning "   ⚠️  Node-RED API not ready, skipping auto-deployment"
+  # Wait for Node-RED HTTP API and deploy flows to activate credentials
+  # This encrypts the plaintext credentials from flows.json into flows_cred.json
+  if wait_for_nodered_api; then
+    if ! deploy_nodered_flows; then
+      bashio::log.warning "   ⚠️  Auto-deployment failed, you may need to manually deploy flows in Node-RED UI"
+      DEPLOYMENT_SUCCESSFUL=false
+    fi
+  else
+    bashio::log.error "   ❌ Node-RED API not responding"
+    bashio::log.error "   ❌ RV Link installation FAILED"
+    DEPLOYMENT_SUCCESSFUL=false
+  fi
 fi
 
 # Mark/update Node-RED as managed by RV Link (updates version on upgrades)
-mark_nodered_managed
-
+if [ "$DEPLOYMENT_SUCCESSFUL" = "true" ]; then
+  mark_nodered_managed
+fi
 
 # ========================
-# All Systems Ready
+# Final Status
 # ========================
-bashio::log.info "🚀 RV Link System Fully Operational"
-bashio::log.info ""
-bashio::log.info "   Components installed:"
-bashio::log.info "   ✅ Mosquitto MQTT Broker"
-bashio::log.info "   ✅ CAN-MQTT Bridge"
-bashio::log.info "   ✅ Node-RED Automation"
-bashio::log.info ""
-bashio::log.info "   💡 Access Node-RED: Settings → Add-ons → Node-RED → Open Web UI"
-bashio::log.info "   💡 CAN bridge status: Check CAN-MQTT Bridge addon logs"
-
-# Keep addon running as orchestrator
-bashio::log.info "   💤 RV Link orchestrator will remain running..."
+if [ "$DEPLOYMENT_SUCCESSFUL" = "true" ]; then
+  bashio::log.info ""
+bashio::log.info "================================================"
+  bashio::log.info "🚐 RV Link System Fully Operational"
+  bashio::log.info "================================================"
+  bashio::log.info ""
+  bashio::log.info "   Components installed:"
+  bashio::log.info "   ✅ Mosquitto MQTT Broker"
+  bashio::log.info "   ✅ CAN-MQTT Bridge"
+  bashio::log.info "   ✅ Node-RED Automation"
+  bashio::log.info ""
+  bashio::log.info "🚐 See the Overview Dashboard for new RV Link entities"
+  bashio::log.info "🚐 Visit https://rvlink.app for more information"
+  bashio::log.info ""
+  
+  # Keep addon running as orchestrator
+  bashio::log.info "   💤 RV Link orchestrator will remain running..."
+else
+  bashio::log.info ""
+  bashio::log.info "================================================"
+  bashio::log.error "❌ RV Link Installation FAILED"
+  bashio::log.info "================================================"
+  bashio::log.info ""
+  bashio::log.error "   Critical component failed to start properly."
+  bashio::log.error "   Please check the logs above for details."
+  bashio::log.error "   You may need to manually configure Node-RED."
+  bashio::log.info ""
+  exit 1
+fi
 
 # Cleanup handler
 cleanup() {
