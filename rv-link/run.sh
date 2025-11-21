@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.41"
+ADDON_VERSION="0.6.44"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -358,6 +358,10 @@ rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
 chmod -R 777 "$PROJECT_PATH"
 bashio::log.info "   ✅ Project files deployed"
 
+# Deploy settings file
+cp /settings.js /config/rv-link-settings.js
+bashio::log.info "   ✅ Settings file deployed"
+
 
 # ========================
 # Phase 1: Mosquitto MQTT Broker
@@ -549,7 +553,7 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 # Init command - Point Node-RED to project directory instead of copying flows
 # This keeps all files in one place and avoids duplication
 # Removed the sed command for adminAuth as we are now configuring users directly
-SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/.rv-link/. /config/projects/rv-link-node-red/; rm -f /config/projects/rv-link-node-red/flows_cred.json; jq --arg user '$MQTT_USER' --arg pass '$MQTT_PASS' 'map(if .id == \"80727e60a251c36c\" then . + {credentials: {user: \$user, password: \$pass}} else . end)' /config/projects/rv-link-node-red/flows.json > /config/projects/rv-link-node-red/flows.json.tmp && mv /config/projects/rv-link-node-red/flows.json.tmp /config/projects/rv-link-node-red/flows.json; if [ -f /config/settings.js ]; then sed -i \"s|flowFile:.*|flowFile: 'projects/rv-link-node-red/flows.json',|\" /config/settings.js; grep -q 'contextStorage:' /config/settings.js || sed -i 's|module.exports.*=.*{|module.exports = {\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|' /config/settings.js; fi; echo 'Node-RED configuration complete'"
+SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/.rv-link/. /config/projects/rv-link-node-red/; rm -f /config/projects/rv-link-node-red/flows_cred.json; jq --arg user '$MQTT_USER' --arg pass '$MQTT_PASS' 'map(if .id == \"80727e60a251c36c\" then . + {credentials: {user: \$user, password: \$pass}} else . end)' /config/projects/rv-link-node-red/flows.json > /config/projects/rv-link-node-red/flows.json.tmp && mv /config/projects/rv-link-node-red/flows.json.tmp /config/projects/rv-link-node-red/flows.json; cp /config/rv-link-settings.js /config/settings.js; echo 'Node-RED configuration complete'"
 
 NEEDS_RESTART=false
 
