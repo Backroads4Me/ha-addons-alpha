@@ -63,6 +63,12 @@ is_installed() {
   local response
   response=$(api_call GET "/addons/$slug/info")
 
+  # Guard against empty responses (e.g. Supervisor starting up)
+  if [ -z "$response" ]; then
+    log_debug "API call returned empty response for $slug"
+    return 1
+  fi
+
   # Check if the API call was successful
   if ! echo "$response" | jq -e '.result == "ok"' >/dev/null 2>&1; then
     log_debug "API call to check $slug installation failed"
@@ -135,7 +141,7 @@ start_addon() {
       return 1
   fi
 
-  local retries=10
+  local retries=30
   while [ $retries -gt 0 ]; do
     if is_running "$slug"; then
       bashio::log.info "   ✅ $slug is running"
@@ -539,14 +545,15 @@ SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red/rvc; cp -r /share/
 NEEDS_RESTART=false
 
 # Define MQTT Env Vars for Node-RED
-MQTT_ENV_VARS=$(jq -n '
-[
-  {"name": "MQTT_USER", "value": "rvlink"},
-  {"name": "MQTT_PASS", "value": "One23four"},
+MQTT_ENV_VARS=$(jq -n \
+  --arg user "$MQTT_USER" \
+  --arg pass "$MQTT_PASS" \
+  '[
+  {"name": "MQTT_USER", "value": $user},
+  {"name": "MQTT_PASS", "value": $pass},
   {"name": "MQTT_HOST", "value": "homeassistant"},
   {"name": "MQTT_PORT", "value": "1883"}
-]
-')
+]')
 
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
@@ -592,6 +599,13 @@ if [ "$NEEDS_RESTART" = "true" ]; then
   else
     bashio::log.info "   > Starting Node-RED with new configuration..."
     start_addon "$SLUG_NODERED" || exit 1
+    
+    # Force a restart after fresh start to fix race condition:
+    # On first boot, Node-RED's initialization may interfere with init_commands.
+    # A restart ensures init_commands run cleanly on an initialized volume.
+    bashio::log.info "   > Performing initialization restart to ensure init_commands take effect..."
+    sleep 5
+    restart_addon "$SLUG_NODERED" || exit 1
   fi
 else
   if ! is_running "$SLUG_NODERED"; then
