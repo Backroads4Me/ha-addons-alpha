@@ -8,25 +8,26 @@ RV Link is a Home Assistant add-on that orchestrates a complete RV monitoring an
 
 ### Key Features
 
-- **Complete System Orchestrator**: Automatically installs and configures Mosquitto, Node-RED, and CAN-MQTT Bridge
+- **One-Time Setup Orchestrator**: Installs and configures Mosquitto, Node-RED, and CAN-MQTT Bridge
 - **Automated Deployment**: Deploys pre-packaged Node-RED flows for RV control
 - **Safety Protection**: Asks permission before modifying existing Node-RED installations
 - **Auto-start Configuration**: All components configured to start automatically on boot
+- **Runs Once and Exits**: Completes setup and exits cleanly - only needs to run during installation/updates
 
 ## How It Works
 
 When you start the RV Link add-on:
 
 1. **System Orchestration**: Installs/starts Mosquitto broker and Node-RED
-2. **Project Deployment**: Deploys the bundled RV Link Node-RED flows to `/share/rv-link`
+2. **Project Deployment**: Deploys the bundled RV Link Node-RED flows to `/share/.rv-link`
 3. **CAN Bridge Setup**: Installs and configures the CAN-MQTT Bridge addon
-4. **Continuous Operation**: Remains running as an orchestrator service
+4. **Exit Clean**: Setup completes and addon exits
 
-All three components are configured to start automatically on Home Assistant boot.
+All three components are configured to start automatically on Home Assistant boot. The RV Link addon itself does not need to remain running - it only runs during initial setup and updates.
 
 ## Automatic Configuration
 
-RV Link automatically configures Node-RED to use the shared flow file at `/share/rv-link/flows.json`, allowing the addon to deploy and update the RV Link automation flows.
+RV Link automatically configures Node-RED to use the shared flow file at `/share/.rv-link/flows.json`, allowing the addon to deploy and update the RV Link automation flows.
 
 ## Prerequisites
 
@@ -145,7 +146,7 @@ The add-on will:
 ### Step 6: Access Node-RED
 
 1. Settings → Add-ons → Node-RED → Open Web UI
-2. The RV Link flows should load automatically from `/share/rv-link/flows.json`
+2. The RV Link flows should load automatically from `/share/.rv-link/flows.json`
 3. Deploy the flows if needed (click Deploy button)
 
 ## Updating the Add-on
@@ -171,16 +172,23 @@ You'll see an update notification in Home Assistant when a new version is releas
 
 ## Project Location
 
-The RV Link flows are stored at:
-```
-/share/rv-link/flows.json
-```
+RV Link manages flows in two locations:
 
-This location is:
-- Directly in the `/share` folder for easy visibility
-- Shared between add-ons and persists across restarts
-- Loaded by Node-RED via the flowFile setting
-- Accessible via File Editor or SSH for manual modifications
+**Source (managed by RV Link):**
+```
+/share/.rv-link/
+```
+- Hidden directory containing bundled flows
+- Updated when RV Link addon runs
+- Do not manually modify
+
+**Active (used by Node-RED):**
+```
+/config/projects/rv-link-node-red/flows.json
+```
+- Copied from source on Node-RED startup
+- Node-RED reads and writes to this location
+- MQTT credentials automatically injected here
 
 ## Troubleshooting
 
@@ -222,11 +230,11 @@ This location is:
 **Cause**: Flow file might not have been configured or deployed properly.
 
 **Solution**:
-1. Check that `/share/rv-link/flows.json` exists (via File Editor or SSH)
-2. Check Node-RED addon logs for errors
+1. Check that `/config/projects/rv-link-node-red/flows.json` exists
+2. Check Node-RED addon logs for errors during startup
 3. Check RV Link addon logs for deployment messages
-4. Restart Node-RED addon
-5. If flows still don't appear, check Node-RED settings at `/addon_configs/a0d7b954_nodered/settings.js` to verify flowFile is set
+4. Restart Node-RED addon to re-run init commands
+5. Verify flowFile setting in `/addon_configs/a0d7b954_nodered/settings.js` points to `projects/rv-link-node-red/flows.json`
 
 ### CAN frames not appearing in MQTT
 

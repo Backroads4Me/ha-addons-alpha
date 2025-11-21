@@ -10,7 +10,7 @@ bashio::log.info "================================================"
 # ========================
 SUPERVISOR="http://supervisor"
 AUTH_HEADER="Authorization: Bearer $SUPERVISOR_TOKEN"
-PROJECT_PATH="/share/rv-link"
+PROJECT_PATH="/share/.rv-link"
 BUNDLED_PROJECT="/opt/rv-link-project"
 
 # Add-on Slugs
@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.25"
+ADDON_VERSION="0.6.33"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -513,9 +513,9 @@ NR_INFO=$(api_call GET "/addons/$SLUG_NODERED/info")
 NR_OPTIONS=$(echo "$NR_INFO" | jq '.data.options')
 SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
-# Init command - single line with proper escaping for Node-RED's eval
-# Commands are chained with && and ; for proper execution
-SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/rv-link/. /config/projects/rv-link-node-red/; cp -vf /share/rv-link/flows.json /config/flows.json; jq --arg user 'rvlink' --arg pass 'One23four' 'map(if .id == \"80727e60a251c36c\" then . + {credentials: {user: \$user, password: \$pass}} else . end)' /config/flows.json > /config/flows.json.tmp && mv /config/flows.json.tmp /config/flows.json; if [ -f /config/settings.js ]; then grep -q 'contextStorage:' /config/settings.js || sed -i 's|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|' /config/settings.js; fi; echo 'Node-RED configuration complete'"
+# Init command - Point Node-RED to project directory instead of copying flows
+# This keeps all files in one place and avoids duplication
+SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/.rv-link/. /config/projects/rv-link-node-red/; rm -f /config/projects/rv-link-node-red/flows_cred.json; jq --arg user 'rvlink' --arg pass 'One23four' 'map(if .id == \"80727e60a251c36c\" then . + {credentials: {user: \$user, password: \$pass}} else . end)' /config/projects/rv-link-node-red/flows.json > /config/projects/rv-link-node-red/flows.json.tmp && mv /config/projects/rv-link-node-red/flows.json.tmp /config/projects/rv-link-node-red/flows.json; if [ -f /config/settings.js ]; then sed -i \"s|flowFile:.*|flowFile: 'projects/rv-link-node-red/flows.json',|\" /config/settings.js; grep -q 'contextStorage:' /config/settings.js || sed -i 's|module.exports[[:space:]]*=[[:space:]]*{|module.exports = {\\n    contextStorage: { default: \"memory\", memory: { module: \"memory\" }, file: { module: \"localfilesystem\" } },|' /config/settings.js; fi; echo 'Node-RED configuration complete'"
 
 NEEDS_RESTART=false
 
@@ -564,7 +564,7 @@ DEPLOYMENT_SUCCESSFUL=true
 
 # Verify Node-RED is actually running before attempting API access
 bashio::log.info "   > Verifying Node-RED is running..."
-local nr_retries=30
+nr_retries=30
 while [ $nr_retries -gt 0 ]; do
   if is_running "$SLUG_NODERED"; then
     bashio::log.info "   ✅ Node-RED is in 'started' state"
@@ -616,9 +616,10 @@ bashio::log.info "================================================"
   bashio::log.info "🚐 See the Overview Dashboard for new RV Link entities"
   bashio::log.info "🚐 Visit https://rvlink.app for more information"
   bashio::log.info ""
-  
-  # Keep addon running as orchestrator
-  bashio::log.info "   💤 RV Link orchestrator will remain running..."
+  bashio::log.info "   ℹ️  RV Link setup complete. The addon will now exit."
+  bashio::log.info "   ℹ️  Restart this addon only when updating RV Link."
+  bashio::log.info ""
+  exit 0
 else
   bashio::log.info ""
   bashio::log.info "================================================"
@@ -632,14 +633,4 @@ else
   exit 1
 fi
 
-# Cleanup handler
-cleanup() {
-    bashio::log.info "Shutdown signal received, exiting gracefully..."
-    exit 0
-}
-trap cleanup SIGTERM SIGINT
-
-# Sleep indefinitely
-while true; do
-    sleep 3600
-done
+# Setup complete, addon exits cleanly

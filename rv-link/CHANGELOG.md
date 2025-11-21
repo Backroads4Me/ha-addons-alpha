@@ -1,3 +1,64 @@
+## [0.6.33] - 2025-11-20
+
+### Changed
+- Remove .git directory during Docker build instead of during deployment
+- Significantly reduces Docker image size
+- Removed --exclude from rsync (no longer needed)
+
+## [0.6.32] - 2025-11-20
+
+### Changed
+- Exclude .git* files during rsync instead of deleting after copy
+- Cleaner approach - git files never reach /share/.rv-link/ or Node-RED config
+- Simplified init command by removing unnecessary cleanup step
+
+## [0.6.31] - 2025-11-20
+
+### Changed
+- Init command now removes .git* files from deployed project directory
+- Cleans up unnecessary version control files in production deployment
+
+## [0.6.30] - 2025-11-20
+
+### Fixed
+- Init command now deletes old flows_cred.json before injecting new credentials
+- Prevents credential mismatch between old encrypted file and new flows
+
+## [0.6.29] - 2025-11-20
+
+### Changed
+- Node-RED now reads flows directly from project directory instead of copying to /config/flows.json
+- flowFile setting points to 'projects/rv-link-node-red/flows.json' for single source of truth
+- Eliminated duplicate flows.json file
+- MQTT credentials injected into project flows.json instead of /config/flows.json
+
+### Fixed
+- Cleaner architecture with flows kept in project directory alongside other assets
+- Simplified init command by removing redundant file copy
+
+## [0.6.28] - 2025-11-20
+
+### Changed
+- Project directory moved from `/share/rv-link` to `/share/.rv-link` (hidden)
+- Prevents users from accidentally modifying managed flows
+
+## [0.6.27] - 2025-11-20
+
+### Changed
+- Addon now uses `startup: services` and exits after setup completion
+- Changed to `boot: auto` to ensure addon runs on upgrades and HA restarts
+- Addon completes setup in seconds and exits cleanly instead of running indefinitely
+- Removed infinite sleep loop - addon is now a true one-time setup orchestrator
+
+### Fixed
+- Addon no longer wastes resources running 24/7 doing nothing
+- Updated documentation to reflect new run-once behavior
+
+## [0.6.26] - 2025-11-20
+
+### Fixed
+- Bash syntax error where 'local' was used outside function scope
+
 ## [0.6.25] - 2025-11-20
 
 ### Changed

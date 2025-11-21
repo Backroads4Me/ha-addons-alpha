@@ -20,7 +20,8 @@ RUN apk add --no-cache \
 
 # Bundle the Node-RED Project
 # Always pulls latest from main branch
-RUN git clone --depth 1 https://github.com/Backroads4Me/rv-link-node-red /opt/rv-link-project
+RUN git clone --depth 1 https://github.com/Backroads4Me/rv-link-node-red /opt/rv-link-project && \
+    rm -rf /opt/rv-link-project/.git
 
 # Copy run script and make it executable
 COPY run.sh /run.sh
