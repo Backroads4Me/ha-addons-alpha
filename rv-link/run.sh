@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.46"
+ADDON_VERSION="0.6.48"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -32,9 +32,9 @@ MQTT_USER=$(bashio::config 'mqtt_user')
 MQTT_PASS=$(bashio::config 'mqtt_pass')
 DEBUG_LOGGING=$(bashio::config 'debug_logging')
 
-# ========================
+# ======================== 
 # Orchestrator Helpers
-# ========================
+# ======================== 
 log_debug() {
   if [ "$DEBUG_LOGGING" = "true" ]; then
     # Log to stderr to avoid polluting stdout (which is captured by $())
@@ -228,29 +228,28 @@ wait_for_mqtt() {
 wait_for_nodered_api() {
   bashio::log.info "   > Waiting for Node-RED API to be ready..."
   
-  # Try different hostnames for Node-RED access
-  local hosts=("a0d7b954-nodered" "127.0.0.1")
+  local host="a0d7b954-nodered"
   local port=1880
   local retries=60
   
   while [ $retries -gt 0 ]; do
-    for host in "${hosts[@]}"; do
-      local url="http://${host}:${port}/"
-      log_debug "   [DEBUG] Trying Node-RED API at $url"
-      
-      # Use -u for authentication if needed by Node-RED's adminAuth
-      if curl -sS -f -m 2 "$url" >/dev/null 2>&1; then
-        bashio::log.info "   ✅ Node-RED API is ready at $url"
-        echo "$host" > /tmp/nodered_host
-        return 0
-      fi
-    done
+    local url="http://${host}:${port}/"
+    log_debug "   [DEBUG] Checking for Node-RED API at $url"
     
-    sleep 2
+    # Check if the port is open, without requiring auth yet.
+    # A 401 error will still return 0 here, which is what we want.
+    if curl -sS -m 3 "$url" >/dev/null 2>&1; then
+      bashio::log.info "   ✅ Node-RED API port is open. Waiting for auth to initialize..."
+      # Give Node-RED a moment to initialize the user auth system
+      sleep 5
+      return 0
+    fi
+    
+    sleep 3
     ((retries--))
   done
-  
-  bashio::log.error "   ❌ Node-RED API not responding on any known host"
+
+  bashio::log.error "   ❌ Node-RED API did not become available at $url"
   return 1
 }
 
@@ -263,18 +262,18 @@ deploy_nodered_flows() {
   fi
   local base_url="http://${host}:1880"
   
-  # Get current flows from Node-RED
+  # Get current flows from Node-RED, now with authentication
   local flows
-  flows=$(curl -s -f -m 5 "${base_url}/flows" 2>/dev/null)
+  flows=$(curl -s -f --user "$MQTT_USER:$MQTT_PASS" -m 5 "${base_url}/flows" 2>/dev/null)
   
   if [ -z "$flows" ] || ! echo "$flows" | jq -e '.' >/dev/null 2>&1; then
-    bashio::log.error "   ❌ Failed to fetch flows from Node-RED at ${base_url}"
+    bashio::log.error "   ❌ Failed to fetch flows from Node-RED (authentication may have failed)."
     return 1
   fi
   
-  # POST the flows back with a 'reload' type. This is less disruptive
-  # than a 'full' deploy and is sufficient to activate nodes.
-  if curl -s -f -m 5 -X POST \
+  # POST the flows back with a 'reload' type to activate nodes.
+  # This also requires authentication.
+  if curl -s -f --user "$MQTT_USER:$MQTT_PASS" -m 5 -X POST \
     -H "Content-Type: application/json" \
     -H "Node-RED-Deployment-Type: reload" \
     -d "$flows" \
@@ -287,9 +286,9 @@ deploy_nodered_flows() {
   fi
 }
 
-# ========================
+# ======================== 
 # State Management
-# ========================
+# ======================== 
 is_nodered_managed() {
   if [ ! -f "$STATE_FILE" ]; then
     return 1
@@ -319,9 +318,9 @@ get_managed_version() {
   jq -r '.version // ""' "$STATE_FILE"
 }
 
-# ========================
+# ======================== 
 # Phase 0: Deployment
-# ========================
+# ======================== 
 bashio::log.info "📋 Phase 0: Deploying Files"
 
 # Ensure directory exists
@@ -338,12 +337,12 @@ fi
 rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
 # Ensure permissions are open (Node-RED runs as non-root)
 chmod -R 777 "$PROJECT_PATH"
-bashio::log.info "   ✅ Project files deployed"
+bashio::log.info "   ✅ Project files deployed
 
 
-# ========================
+# ======================== 
 # Phase 1: Mosquitto MQTT Broker
-# ========================
+# ======================== 
 bashio::log.info "📋 Phase 1: Installing Mosquitto MQTT Broker"
 
 # 1. Mosquitto
@@ -399,9 +398,9 @@ wait_for_mqtt "$MQTT_HOST" "$MQTT_PORT" "$MQTT_USER" "$MQTT_PASS" || {
     exit 1
 }
 
-# ========================
+# ======================== 
 # Phase 2: CAN-MQTT Bridge
-# ========================
+# ======================== 
 bashio::log.info "📋 Phase 2: Installing CAN-MQTT Bridge"
 
 # Check if CAN-MQTT Bridge is installed
@@ -430,8 +429,8 @@ CAN_BRIDGE_CONFIG=$(jq -n \
   --arg mqtt_topic_raw "$MQTT_TOPIC_RAW" \
   --arg mqtt_topic_send "$MQTT_TOPIC_SEND" \
   --arg mqtt_topic_status "$MQTT_TOPIC_STATUS" \
-  '{
-    "options": {
+  '{ 
+    "options": { 
       "can_interface": $can_interface,
       "can_bitrate": $can_bitrate,
       "mqtt_host": $mqtt_host,
@@ -467,9 +466,9 @@ else
     bashio::log.warning "   Note: Bridge will fail if CAN hardware is not connected, but system orchestration succeeded."
 fi
 
-# ========================
+# ======================== 
 # Phase 3: Node-RED
-# ========================
+# ======================== 
 bashio::log.info "📋 Phase 3: Installing Node-RED"
 
 CONFIRM_TAKEOVER=$(bashio::config 'confirm_nodered_takeover')
@@ -573,7 +572,7 @@ else
       --arg user "$MQTT_USER" \
       --arg pass "$MQTT_PASS" \
       --argjson env_vars "$MQTT_ENV_VARS" \
-      '
+      ' 
       . + {"init_commands": [$initcmd], "env_vars": $env_vars} |
       .users = (.users // []) |
       .users |= (map(select(.username != $user)) + [{"username": $user, "password": $pass, "permissions": "*"}])
@@ -620,9 +619,9 @@ set_boot_auto "$SLUG_NODERED" || bashio::log.warning "   ⚠️  Could not set N
 # Mark/update Node-RED as managed by RV Link (updates version on upgrades)
 mark_nodered_managed
 
-# ========================
+# ======================== 
 # Final Status
-# ========================
+# ======================== 
 bashio::log.info ""
 bashio::log.info "================================================"
 bashio::log.info "🚐 RV Link System Fully Operational"
