@@ -268,29 +268,47 @@ deploy_nodered_flows() {
   fi
   local base_url="http://${host}:1880"
   
-  # Get current flows from Node-RED, now with authentication
-  local flows
-  flows=$(curl -s -f --user "$MQTT_USER:$MQTT_PASS" -m 5 "${base_url}/flows" 2>/dev/null)
+  # FETCH PHASE: Retry until Node-RED is fully ready
+  local flows=""
+  local retries=15
+  local success=false
   
-  if [ -z "$flows" ] || ! echo "$flows" | jq -e '.' >/dev/null 2>&1; then
-    bashio::log.error "   ❌ Failed to fetch flows from Node-RED (authentication may have failed)."
+  bashio::log.info "   > Waiting for Node-RED to be ready for deployment..."
+  while [ $retries -gt 0 ]; do
+    if flows=$(curl -s -f --user "$MQTT_USER:$MQTT_PASS" -m 5 "${base_url}/flows" 2>/dev/null); then
+      if echo "$flows" | jq -e '.' >/dev/null 2>&1; then
+        success=true
+        break
+      fi
+    fi
+    log_debug "   [DEBUG] Node-RED API not ready yet. Retrying in 3s... ($retries attempts left)"
+    sleep 3
+    ((retries--))
+  done
+  
+  if [ "$success" = "false" ]; then
+    bashio::log.error "   ❌ Failed to communicate with Node-RED API after 45 seconds."
     return 1
   fi
   
-  # POST the flows back with a 'reload' type to activate nodes.
-  # This also requires authentication.
-  if curl -s -f --user "$MQTT_USER:$MQTT_PASS" -m 5 -X POST \
+  bashio::log.info "   ✅ Node-RED API ready. Deploying flows..."
+  
+  # DEPLOY PHASE: Use "full" deployment for complete node restart
+  if curl -s -f --user "$MQTT_USER:$MQTT_PASS" -m 10 -X POST \
     -H "Content-Type: application/json" \
     -H "Node-RED-Deployment-Type: reload" \
     -d "$flows" \
     "${base_url}/flows" >/dev/null 2>&1; then
-    bashio::log.info "   ✅ Node-RED flows reloaded successfully"
+    
+    bashio::log.info "   ✅ Node-RED flows deployed successfully"
+    # Give MQTT nodes time to establish connections
+    sleep 5
     return 0
   else
-    bashio::log.warning "   ⚠️  Failed to reload flows. MQTT nodes may not connect automatically."
+    bashio::log.warning "   ⚠️  Failed to deploy flows. You may need to click Deploy manually."
     return 1
   fi
-}
+
 
 # ======================== 
 # State Management
