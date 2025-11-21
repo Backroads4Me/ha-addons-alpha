@@ -337,7 +337,7 @@ fi
 rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
 # Ensure permissions are open (Node-RED runs as non-root)
 chmod -R 777 "$PROJECT_PATH"
-bashio::log.info "   ✅ Project files deployed
+bashio::log.info "   ✅ Project files deployed"
 
 
 # ======================== 
