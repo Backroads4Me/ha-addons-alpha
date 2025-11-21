@@ -1,3 +1,14 @@
+## [0.6.21] - 2025-11-20
+
+### Added
+- Automatic Node-RED flow deployment via HTTP Admin API after startup
+- Wait for Node-RED API readiness before attempting deployment
+
+### Fixed
+- MQTT credentials now properly encrypted into flows_cred.json via automatic deployment
+- Node-RED flows now work immediately without requiring manual deployment
+- Init commands now execute properly on first configuration by ensuring Node-RED starts/restarts
+
 ## [0.6.20] - 2025-11-20
 
 ### Fixed

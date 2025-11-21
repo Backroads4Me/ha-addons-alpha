@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.20"
+ADDON_VERSION="0.6.21"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -221,6 +221,51 @@ wait_for_mqtt() {
 
   bashio::log.error "   ❌ MQTT broker not responding"
   return 1
+}
+
+wait_for_nodered_api() {
+  bashio::log.info "   > Waiting for Node-RED API to be ready..."
+  
+  local retries=60
+  while [ $retries -gt 0 ]; do
+    # Try to reach Node-RED admin API (runs on port 1880 in the addon)
+    if curl -s -f -m 2 "http://a0d7b954-nodered:1880/" >/dev/null 2>&1; then
+      bashio::log.info "   ✅ Node-RED API is ready"
+      return 0
+    fi
+    sleep 2
+    ((retries--))
+  done
+  
+  bashio::log.error "   ❌ Node-RED API not responding"
+  return 1
+}
+
+deploy_nodered_flows() {
+  bashio::log.info "   > Triggering Node-RED flow deployment..."
+  
+  # Get current flows from Node-RED
+  local flows=$(curl -s -f -m 5 "http://a0d7b954-nodered:1880/flows" 2>/dev/null)
+  
+  if [ -z "$flows" ] || ! echo "$flows" | jq -e '.' >/dev/null 2>&1; then
+    bashio::log.error "   ❌ Failed to fetch flows from Node-RED"
+    return 1
+  fi
+  
+  # Deploy the flows (POST back to trigger encryption of credentials)
+  local result=$(curl -s -f -m 5 -X POST \
+    -H "Content-Type: application/json" \
+    -H "Node-RED-Deployment-Type: full" \
+    -d "$flows" \
+    "http://a0d7b954-nodered:1880/flows" 2>/dev/null)
+  
+  if [ $? -eq 0 ]; then
+    bashio::log.info "   ✅ Node-RED flows deployed (credentials encrypted)"
+    return 0
+  else
+    bashio::log.warning "   ⚠️  Failed to deploy flows, may need manual deployment"
+    return 1
+  fi
 }
 
 # ========================
@@ -483,20 +528,34 @@ else
   fi
 fi
 
-# Restart Node-RED if configuration changed or if it's running
+# Ensure Node-RED starts/restarts to apply init commands
 if [ "$NEEDS_RESTART" = "true" ]; then
   if is_running "$SLUG_NODERED"; then
-    bashio::log.info "   > Restarting Node-RED to apply changes..."
+    # Already running, restart to apply new init commands
+    bashio::log.info "   > Restarting Node-RED to apply init commands..."
     restart_addon "$SLUG_NODERED" || exit 1
+  else
+    # Not running, start it (init commands will run on startup)
+    bashio::log.info "   > Starting Node-RED with new configuration..."
+    start_addon "$SLUG_NODERED" || exit 1
   fi
-fi
-
-if ! is_running "$SLUG_NODERED"; then
-  start_addon "$SLUG_NODERED" || exit 1
+else
+  # No changes needed, but ensure it's running
+  if ! is_running "$SLUG_NODERED"; then
+    start_addon "$SLUG_NODERED" || exit 1
+  fi
 fi
 
 # Ensure Node-RED starts on boot
 set_boot_auto "$SLUG_NODERED" || bashio::log.warning "   ⚠️  Could not set Node-RED to auto-start"
+
+# Wait for Node-RED HTTP API and deploy flows to activate credentials
+# This encrypts the plaintext credentials from flows.json into flows_cred.json
+if wait_for_nodered_api; then
+  deploy_nodered_flows || bashio::log.warning "   ⚠️  Auto-deployment failed, you may need to manually deploy flows in Node-RED UI"
+else
+  bashio::log.warning "   ⚠️  Node-RED API not ready, skipping auto-deployment"
+fi
 
 # Mark/update Node-RED as managed by RV Link (updates version on upgrades)
 mark_nodered_managed
