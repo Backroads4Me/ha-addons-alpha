@@ -308,6 +308,7 @@ deploy_nodered_flows() {
     bashio::log.warning "   ⚠️  Failed to deploy flows. You may need to click Deploy manually."
     return 1
   fi
+}
 
 
 # ======================== 
