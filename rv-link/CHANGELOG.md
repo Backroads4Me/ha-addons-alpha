@@ -1,3 +1,23 @@
+## [0.6.19] - 2025-11-20
+
+### Added
+- State tracking system to remember Node-RED management status across restarts
+- Version tracking in state file for upgrade detection
+
+### Fixed
+- Node-RED takeover confirmation now only required on first install, not on restarts
+- RV Link no longer asks for permission after it has already taken over Node-RED
+
+## [0.6.18] - 2025-11-20
+
+### Changed
+- CAN-MQTT Bridge now installs before Node-RED to ensure proper component availability
+- Startup log message updated to use recreational vehicle icon
+
+### Fixed
+- MQTT credentials now properly injected into Node-RED flows using corrected jq escaping
+- Node-RED restart logic improved to ensure init commands execute on all configuration changes
+
 ## [0.6.17] - 2025-11-20
 
 ### Fixed
