@@ -1,6 +1,6 @@
 # Home Assistant add-on: RV Link
 name: "RV Link"
-version: "0.6.33"
+version: "0.6.34"
 slug: "rv-link"
 description: "RV Link orchestrator: Installs and configures Mosquitto, Node-RED, and CAN-MQTT Bridge for complete RV control."
 url: "https://github.com/Backroads4Me/ha-addons"

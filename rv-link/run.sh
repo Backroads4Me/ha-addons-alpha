@@ -238,11 +238,18 @@ wait_for_nodered_api() {
         bashio::log.info "   [DEBUG] Trying $url"
       fi
       
-      if curl -s -f -m 2 "$url" >/dev/null 2>&1; then
+      # Capture output/error to debug
+      local output
+      if output=$(curl -s -f -m 2 "$url" 2>&1); then
         bashio::log.info "   ✅ Node-RED API is ready at $url"
         # Store the working host for deploy function
         echo "$host" > /tmp/nodered_host
         return 0
+      else
+        # Only log detailed error if debug logging is on OR if we are running out of retries (e.g. last 5)
+        if [ "$DEBUG_LOGGING" = "true" ] || [ $retries -le 5 ]; then
+             bashio::log.warning "   [DEBUG] Connection to $url failed: $output"
+        fi
       fi
     done
     

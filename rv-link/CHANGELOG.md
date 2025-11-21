@@ -1,3 +1,9 @@
+## [0.6.34] - 2025-11-20
+
+### Changed
+- Added detailed debug logging to Node-RED API detection to diagnose connection failures
+- Captures and logs specific curl error messages (connection refused, timeout, etc.)
+
 ## [0.6.33] - 2025-11-20
 
 ### Changed
