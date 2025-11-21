@@ -225,6 +225,68 @@ wait_for_mqtt() {
   return 1
 }
 
+wait_for_nodered_api() {
+  bashio::log.info "   > Waiting for Node-RED API to be ready..."
+  
+  # Try different hostnames for Node-RED access
+  local hosts=("a0d7b954-nodered" "127.0.0.1")
+  local port=1880
+  local retries=60
+  
+  while [ $retries -gt 0 ]; do
+    for host in "${hosts[@]}"; do
+      local url="http://${host}:${port}/"
+      log_debug "   [DEBUG] Trying Node-RED API at $url"
+      
+      # Use -u for authentication if needed by Node-RED's adminAuth
+      if curl -sS -f -m 2 "$url" >/dev/null 2>&1; then
+        bashio::log.info "   ✅ Node-RED API is ready at $url"
+        echo "$host" > /tmp/nodered_host
+        return 0
+      fi
+    done
+    
+    sleep 2
+    ((retries--))
+  done
+  
+  bashio::log.error "   ❌ Node-RED API not responding on any known host"
+  return 1
+}
+
+deploy_nodered_flows() {
+  bashio::log.info "   > Triggering Node-RED flow deployment..."
+  
+  local host="a0d7b954-nodered"
+  if [ -f /tmp/nodered_host ]; then
+    host=$(cat /tmp/nodered_host)
+  fi
+  local base_url="http://${host}:1880"
+  
+  # Get current flows from Node-RED
+  local flows
+  flows=$(curl -s -f -m 5 "${base_url}/flows" 2>/dev/null)
+  
+  if [ -z "$flows" ] || ! echo "$flows" | jq -e '.' >/dev/null 2>&1; then
+    bashio::log.error "   ❌ Failed to fetch flows from Node-RED at ${base_url}"
+    return 1
+  fi
+  
+  # POST the flows back with a 'reload' type. This is less disruptive
+  # than a 'full' deploy and is sufficient to activate nodes.
+  if curl -s -f -m 5 -X POST \
+    -H "Content-Type: application/json" \
+    -H "Node-RED-Deployment-Type: reload" \
+    -d "$flows" \
+    "${base_url}/flows" >/dev/null 2>&1; then
+    bashio::log.info "   ✅ Node-RED flows reloaded successfully"
+    return 0
+  else
+    bashio::log.warning "   ⚠️  Failed to reload flows. MQTT nodes may not connect automatically."
+    return 1
+  fi
+}
+
 # ========================
 # State Management
 # ========================
@@ -538,6 +600,20 @@ else
   fi
 fi
 
+# After starting/restarting, wait for the API to be available.
+# This ensures the init_command has run and flows are loaded before we proceed.
+if ! wait_for_nodered_api; then
+    bashio::log.fatal "   ❌ Node-RED API did not become available. Cannot deploy flows."
+    exit 1
+fi
+
+# Now, trigger a flow deployment. This is the equivalent of clicking the
+# "Deploy" button in the UI and forces MQTT nodes to activate their connection.
+if ! deploy_nodered_flows; then
+    bashio::log.warning "   ⚠️  Flow deployment failed. MQTT nodes may not connect."
+    bashio::log.warning "   You may need to open Node-RED and click 'Deploy' manually."
+fi
+
 # Ensure Node-RED starts on boot
 set_boot_auto "$SLUG_NODERED" || bashio::log.warning "   ⚠️  Could not set Node-RED to auto-start"
 
@@ -563,4 +639,3 @@ bashio::log.info ""
 bashio::log.info "   ℹ️  RV Link setup complete. The addon will now exit."
 bashio::log.info "   ℹ️  Restart this addon only when updating RV Link."
 bashio::log.info ""
-exit 0

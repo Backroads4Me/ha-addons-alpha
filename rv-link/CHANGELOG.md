@@ -1,3 +1,9 @@
+## [0.6.48] - 2025-11-21
+
+### Fixed
+
+- Re-implemented Node-RED flow deployment to fix MQTT connection issue. The script now waits for the Node-RED API to be available and then triggers a flow "reload", which is necessary to activate the MQTT nodes after startup.
+
 ## [0.6.47] - 2025-11-21
 
 ### Removed
