@@ -26,7 +26,7 @@ RUN git clone --depth 1 https://github.com/Backroads4Me/rv-link-node-red /opt/rv
 
 # Copy run script and make it executable
 COPY run.sh /run.sh
-COPY settings.js /settings.js
+
 RUN chmod a+x /run.sh
 
 CMD ["/run.sh"]

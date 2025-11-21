@@ -225,86 +225,6 @@ wait_for_mqtt() {
   return 1
 }
 
-wait_for_nodered_api() {
-  bashio::log.info "   > Waiting for Node-RED API to be ready..."
-  
-  # Try different hostnames for Node-RED access
-  local hosts=("a0d7b954-nodered" "172.30.32.1" "homeassistant.local")
-  local port=1880
-  local retries=60
-  
-  while [ $retries -gt 0 ]; do
-    for host in "${hosts[@]}"; do
-      local url="http://${host}:${port}/"
-      if [ "$DEBUG_LOGGING" = "true" ]; then
-        bashio::log.info "   [DEBUG] Trying $url"
-      fi
-      
-      # Capture output/error to debug
-      local output
-      # Use -u for authentication
-      if [ "$DEBUG_LOGGING" = "true" ]; then
-          if output=$(curl -v -sS -f -u "$MQTT_USER:$MQTT_PASS" -m 2 "$url" 2>&1); then
-            bashio::log.info "   ✅ Node-RED API is ready at $url"
-            echo "$host" > /tmp/nodered_host
-            return 0
-          fi
-      else
-          if output=$(curl -sS -f -u "$MQTT_USER:$MQTT_PASS" -m 2 "$url" 2>&1); then
-            bashio::log.info "   ✅ Node-RED API is ready at $url"
-            echo "$host" > /tmp/nodered_host
-            return 0
-          fi
-      fi
-
-      # Only log detailed error if debug logging is on OR if we are running out of retries (e.g. last 5)
-      if [ "$DEBUG_LOGGING" = "true" ] || [ $retries -le 5 ]; then
-           bashio::log.warning "   [DEBUG] Connection to $url failed: $output"
-      fi
-    done
-    
-    sleep 2
-    ((retries--))
-  done
-  
-  bashio::log.error "   ❌ Node-RED API not responding on any known host"
-  return 1
-}
-
-deploy_nodered_flows() {
-  bashio::log.info "   > Triggering Node-RED flow deployment..."
-  
-  # Get the working host from detection
-  local host="a0d7b954-nodered"
-  if [ -f /tmp/nodered_host ]; then
-    host=$(cat /tmp/nodered_host)
-  fi
-  local base_url="http://${host}:1880"
-  
-  # Get current flows from Node-RED
-  local flows=$(curl -s -f -u "$MQTT_USER:$MQTT_PASS" -m 5 "${base_url}/flows" 2>/dev/null)
-  
-  if [ -z "$flows" ] || ! echo "$flows" | jq -e '.' >/dev/null 2>&1; then
-    bashio::log.error "   ❌ Failed to fetch flows from Node-RED at ${base_url}"
-    return 1
-  fi
-  
-  # Deploy the flows (POST back to trigger encryption of credentials)
-  local result=$(curl -s -f -u "$MQTT_USER:$MQTT_PASS" -m 5 -X POST \
-    -H "Content-Type: application/json" \
-    -H "Node-RED-Deployment-Type: full" \
-    -d "$flows" \
-    "${base_url}/flows" 2>/dev/null)
-  
-  if [ $? -eq 0 ]; then
-    bashio::log.info "   ✅ Node-RED flows deployed (credentials encrypted)"
-    return 0
-  else
-    bashio::log.warning "   ⚠️  Failed to deploy flows, may need manual deployment"
-    return 1
-  fi
-}
-
 # ========================
 # State Management
 # ========================
@@ -352,15 +272,11 @@ else
     bashio::log.info "   📦 Deploying bundled project to $PROJECT_PATH..."
 fi
 
-# Sync all files, deleting extraneous ones in destination
+# Deploy project files
 rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
 # Ensure permissions are open (Node-RED runs as non-root)
 chmod -R 777 "$PROJECT_PATH"
 bashio::log.info "   ✅ Project files deployed"
-
-# Deploy settings file
-cp /settings.js /share/.rv-link/settings.js
-bashio::log.info "   ✅ Settings file deployed"
 
 
 # ========================
@@ -550,30 +466,53 @@ NR_INFO=$(api_call GET "/addons/$SLUG_NODERED/info")
 NR_OPTIONS=$(echo "$NR_INFO" | jq '.data.options')
 SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
-# Init command - Point Node-RED to project directory instead of copying flows
-# This keeps all files in one place and avoids duplication
-# Removed the sed command for adminAuth as we are now configuring users directly
-SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red; cp -rf /share/.rv-link/. /config/projects/rv-link-node-red/; rm -f /config/projects/rv-link-node-red/flows_cred.json; jq --arg user '$MQTT_USER' --arg pass '$MQTT_PASS' 'map(if .id == \"80727e60a251c36c\" then . + {credentials: {user: \$user, password: \$pass}} else . end)' /config/projects/rv-link-node-red/flows.json > /config/projects/rv-link-node-red/flows.json.tmp && mv /config/projects/rv-link-node-red/flows.json.tmp /config/projects/rv-link-node-red/flows.json; cp /share/.rv-link/settings.js /config/settings.js; echo 'Node-RED configuration complete'"
+# Define the command that will run inside the Node-RED container on startup.
+# 1. Create project directories needed by the flow.
+# 2. Copy the essential 'rvc' directory into the project space.
+# 3. Use jq to modify the source flows.json:
+#    - It finds the 'mqtt-broker' node.
+#    - It overwrites the broker and credentials to use environment variables.
+#    - The output is written directly to the default /config/flows.json location.
+SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red/rvc; cp -r /share/.rv-link/rvc/. /config/projects/rv-link-node-red/rvc/; jq '(.[] | select(.type == \"mqtt-broker\")) |= . + {\"broker\": \"mqtt://homeassistant:1883\", \"credentials\": {\"user\": \"${MQTT_USER}\", \"password\": \"${MQTT_PASS}\"}}' /share/.rv-link/flows.json > /config/flows.json"
 
 NEEDS_RESTART=false
+
+# Define MQTT Env Vars for Node-RED
+MQTT_ENV_VARS=$(jq -n '
+[
+  {"name": "MQTT_USER", "value": "rvlink"},
+  {"name": "MQTT_PASS", "value": "One23four"},
+  {"name": "MQTT_HOST", "value": "homeassistant"},
+  {"name": "MQTT_PORT", "value": "1883"}
+]
+')
 
 if [ -z "$SECRET" ]; then
   bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
   NEW_SECRET=$(openssl rand -hex 16)
-  # Add user configuration
-  NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg secret "$NEW_SECRET" --arg initcmd "$SETTINGS_INIT_CMD" --arg user "$MQTT_USER" --arg pass "$MQTT_PASS" '. + {"credential_secret": $secret, "ssl": false, "init_commands": [$initcmd], "users": [{"username": $user, "password": $pass, "permissions": "*"}]}')
+  NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq \
+    --arg secret "$NEW_SECRET" \
+    --arg initcmd "$SETTINGS_INIT_CMD" \
+    --arg user "$MQTT_USER" \
+    --arg pass "$MQTT_PASS" \
+    --argjson env_vars "$MQTT_ENV_VARS" \
+    '. + {"credential_secret": $secret, "ssl": false, "init_commands": [$initcmd], "env_vars": $env_vars, "users": [{"username": $user, "password": $pass, "permissions": "*"}]}')
   set_options "$SLUG_NODERED" "$NEW_OPTIONS" || exit 1
   NEEDS_RESTART=true
 else
   CURRENT_INIT_CMD=$(echo "$NR_OPTIONS" | jq -r '.init_commands[0] // empty')
-  # Check if user is configured
   CURRENT_USER=$(echo "$NR_OPTIONS" | jq -r --arg user "$MQTT_USER" '.users[] | select(.username == $user) | .username')
   
-  if [ "$CURRENT_INIT_CMD" != "$SETTINGS_INIT_CMD" ] || [ -z "$CURRENT_USER" ]; then
-    bashio::log.info "   > Updating Node-RED configuration (init commands / users)..."
-    # Update init commands and ensure user exists
-    NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq --arg initcmd "$SETTINGS_INIT_CMD" --arg user "$MQTT_USER" --arg pass "$MQTT_PASS" '
-      . + {"init_commands": [$initcmd]} |
+  # Check if config needs updating (init command changed, user missing, or env vars different)
+  if [ "$CURRENT_INIT_CMD" != "$SETTINGS_INIT_CMD" ] || [ -z "$CURRENT_USER" ] || [ "$(echo "$NR_OPTIONS" | jq '.env_vars')" != "$MQTT_ENV_VARS" ]; then
+    bashio::log.info "   > Updating Node-RED configuration (init commands / users / env_vars)..."
+    NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq \
+      --arg initcmd "$SETTINGS_INIT_CMD" \
+      --arg user "$MQTT_USER" \
+      --arg pass "$MQTT_PASS" \
+      --argjson env_vars "$MQTT_ENV_VARS" \
+      '
+      . + {"init_commands": [$initcmd], "env_vars": $env_vars} |
       .users = (.users // []) |
       .users |= (map(select(.username != $user)) + [{"username": $user, "password": $pass, "permissions": "*"}])
     ')
@@ -587,16 +526,13 @@ fi
 # Ensure Node-RED starts/restarts to apply init commands
 if [ "$NEEDS_RESTART" = "true" ]; then
   if is_running "$SLUG_NODERED"; then
-    # Already running, restart to apply new init commands
-    bashio::log.info "   > Restarting Node-RED to apply init commands..."
+    bashio::log.info "   > Restarting Node-RED to apply new configuration..."
     restart_addon "$SLUG_NODERED" || exit 1
   else
-    # Not running, start it (init commands will run on startup)
     bashio::log.info "   > Starting Node-RED with new configuration..."
     start_addon "$SLUG_NODERED" || exit 1
   fi
 else
-  # No changes needed, but ensure it's running
   if ! is_running "$SLUG_NODERED"; then
     start_addon "$SLUG_NODERED" || exit 1
   fi
@@ -605,78 +541,26 @@ fi
 # Ensure Node-RED starts on boot
 set_boot_auto "$SLUG_NODERED" || bashio::log.warning "   ⚠️  Could not set Node-RED to auto-start"
 
-# Track deployment success for final status
-DEPLOYMENT_SUCCESSFUL=true
-
-# Verify Node-RED is actually running before attempting API access
-bashio::log.info "   > Verifying Node-RED is running..."
-nr_retries=30
-while [ $nr_retries -gt 0 ]; do
-  if is_running "$SLUG_NODERED"; then
-    bashio::log.info "   ✅ Node-RED is in 'started' state"
-    break
-  fi
-  bashio::log.info "   > Waiting for Node-RED to reach 'started' state... ($nr_retries retries left)"
-  sleep 2
-  ((nr_retries--))
-done
-
-if ! is_running "$SLUG_NODERED"; then
-  bashio::log.error "   ❌ Node-RED failed to reach 'started' state"
-  bashio::log.error "   ❌ RV Link installation FAILED"
-  DEPLOYMENT_SUCCESSFUL=false
-else
-  # Wait for Node-RED HTTP API and deploy flows to activate credentials
-  # This encrypts the plaintext credentials from flows.json into flows_cred.json
-  if wait_for_nodered_api; then
-    if ! deploy_nodered_flows; then
-      bashio::log.warning "   ⚠️  Auto-deployment failed, you may need to manually deploy flows in Node-RED UI"
-      DEPLOYMENT_SUCCESSFUL=false
-    fi
-  else
-    bashio::log.error "   ❌ Node-RED API not responding"
-    bashio::log.error "   ❌ RV Link installation FAILED"
-    DEPLOYMENT_SUCCESSFUL=false
-  fi
-fi
-
 # Mark/update Node-RED as managed by RV Link (updates version on upgrades)
-if [ "$DEPLOYMENT_SUCCESSFUL" = "true" ]; then
-  mark_nodered_managed
-fi
+mark_nodered_managed
 
 # ========================
 # Final Status
 # ========================
-if [ "$DEPLOYMENT_SUCCESSFUL" = "true" ]; then
-  bashio::log.info ""
+bashio::log.info ""
 bashio::log.info "================================================"
-  bashio::log.info "🚐 RV Link System Fully Operational"
-  bashio::log.info "================================================"
-  bashio::log.info ""
-  bashio::log.info "   Components installed:"
-  bashio::log.info "   ✅ Mosquitto MQTT Broker"
-  bashio::log.info "   ✅ CAN-MQTT Bridge"
-  bashio::log.info "   ✅ Node-RED Automation"
-  bashio::log.info ""
-  bashio::log.info "🚐 See the Overview Dashboard for new RV Link entities"
-  bashio::log.info "🚐 Visit https://rvlink.app for more information"
-  bashio::log.info ""
-  bashio::log.info "   ℹ️  RV Link setup complete. The addon will now exit."
-  bashio::log.info "   ℹ️  Restart this addon only when updating RV Link."
-  bashio::log.info ""
-  exit 0
-else
-  bashio::log.info ""
-  bashio::log.info "================================================"
-  bashio::log.error "❌ RV Link Installation FAILED"
-  bashio::log.info "================================================"
-  bashio::log.info ""
-  bashio::log.error "   Critical component failed to start properly."
-  bashio::log.error "   Please check the logs above for details."
-  bashio::log.error "   You may need to manually configure Node-RED."
-  bashio::log.info ""
-  exit 1
-fi
-
-# Setup complete, addon exits cleanly
+bashio::log.info "🚐 RV Link System Fully Operational"
+bashio::log.info "================================================"
+bashio::log.info ""
+bashio::log.info "   Components installed:"
+bashio::log.info "   ✅ Mosquitto MQTT Broker"
+bashio::log.info "   ✅ CAN-MQTT Bridge"
+bashio::log.info "   ✅ Node-RED Automation"
+bashio::log.info ""
+bashio::log.info "🚐 See the Overview Dashboard for new RV Link entities"
+bashio::log.info "🚐 Visit https://rvlink.app for more information"
+bashio::log.info ""
+bashio::log.info "   ℹ️  RV Link setup complete. The addon will now exit."
+bashio::log.info "   ℹ️  Restart this addon only when updating RV Link."
+bashio::log.info ""
+exit 0

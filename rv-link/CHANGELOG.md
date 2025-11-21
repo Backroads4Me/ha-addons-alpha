@@ -1,3 +1,19 @@
+## [0.6.47] - 2025-11-21
+
+### Removed
+
+- Dynamic settings.js creation and copying mechanism.
+- Obsolete `settings.js` and `verify_sed.sh` files.
+- Node-RED API waiting and flow deployment logic (`wait_for_nodered_api`, `deploy_nodered_flows`).
+
+### Changed
+
+- Node-RED configuration simplified:
+    - `flows.json` is now directly modified with MQTT credentials (using environment variables) and copied to `/config/flows.json`.
+    - Node-RED environment variables (`MQTT_USER`, `MQTT_PASS`, `MQTT_HOST`, `MQTT_PORT`) are now passed directly via Supervisor API.
+    - Node-RED no longer uses a custom `settings.js` or project mode for flows.
+    - Project directories for `rvc` content are still created and copied to ensure dependent files are available to Node-RED.
+
 ## [0.6.38] - 2025-11-20
 
 ### Changed
