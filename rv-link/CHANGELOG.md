@@ -1,3 +1,55 @@
+## [0.6.60] - 2025-11-22
+
+### Fixed
+
+- Critical flow update mechanism - Node-RED now correctly restarts when RV Link version changes to apply updated flows
+- Previously, updated flows would be deployed to /share but Node-RED would continue running old flows until manual restart
+
+## [0.6.59] - 2025-11-22
+
+### Security
+
+- Fixed insecure file permissions (chmod 777 → 755) for deployed project files
+- Added input validation to prevent injection attacks in CAN interface, MQTT user, and bitrate config values
+
+### Fixed
+
+- Unchecked API call result when configuring Mosquitto user (critical bug)
+- Unquoted variables in shell commands ($auth_args, $PROJECT_PATH) that could fail with special characters
+- Error message inconsistency (using ⚠️ with bashio::log.error instead of ❌)
+- Missing error handling for rsync command during project file deployment
+- Race condition handling improved with 10-second delay (was 5 seconds) for slower hardware
+
+### Changed
+
+- Added comprehensive comments explaining MQTT hostname differences (core-mosquitto vs homeassistant)
+- Improved MQTT connection handling with proper command quoting using eval
+- Enhanced documentation with detailed init_commands approach explanation
+
+### Documentation
+
+- Added "Init Commands Approach" section to DOCS.md explaining the technical implementation
+- Documented why two different MQTT hostnames are used and how they relate
+
+## [0.6.58] - 2025-11-22
+
+### Changed
+
+- Default MQTT password to stronger value with security notice
+- Documentation to remove outdated alpha logging section
+- Logging section updated with cleaner description
+
+### Removed
+
+- Leftover testing code checking for /tmp/nodered_host
+- Redundant [DEBUG] prefixes in debug log messages
+
+## [0.6.57] - 2025-11-22
+
+### Changed
+
+- Final status message wording to be more conversational
+
 ## [0.6.56] - 2025-11-22
 
 ### Fixed

@@ -91,12 +91,14 @@ confirm_nodered_takeover: true
 
 ### MQTT Settings
 
-Advanced users can override auto-discovered MQTT settings:
+RV Link automatically configures MQTT credentials for internal communication:
 
-- `mqtt_host` - MQTT broker hostname (default: auto-discovered)
-- `mqtt_port` - MQTT port (default: 1883)
-- `mqtt_user` - MQTT username (optional)
-- `mqtt_pass` - MQTT password (optional)
+- `mqtt_user` - MQTT username (default: `rvlink`)
+- `mqtt_pass` - MQTT password (default: `rvlink2024!changeme`)
+  - **Security Note**: Change this default password in production environments
+
+Advanced MQTT settings (rarely need changing):
+
 - `mqtt_topic_raw` - Topic for raw CAN frames (default: `can/raw`)
 - `mqtt_topic_send` - Topic for sending CAN frames (default: `can/send`)
 - `mqtt_topic_status` - Topic for status messages (default: `can/status`)
@@ -283,32 +285,13 @@ To view detailed logs:
 
 Settings → Add-ons → RV Link → Log
 
-### Alpha Version - Enhanced Logging
+The add-on logs show:
+- Each phase of the installation process
+- Success or error messages for each component
+- Configuration status for Mosquitto, Node-RED, and CAN-MQTT Bridge
+- Deployment status
 
-This alpha release includes extensive diagnostic logging for troubleshooting:
-
-**Environment Information:**
-- Alpine Linux version
-- Git and bash versions
-- User and working directory
-- Supervisor token validation
-
-**Detailed Operation Logs:**
-- All Supervisor API requests and responses
-- Git command output (fetch, pull, reset, clone, checkout)
-- File operations with before/after stats
-- Settings.js modification steps
-- Directory contents on failures
-
-**What Logs Show:**
-- Configuration being used
-- Each step of the deployment process with sub-steps
-- Success or error messages with diagnostic info
-- Git operations with full command output
-- API responses from Home Assistant Supervisor
-- File sizes, line counts, and modification details
-
-This verbose logging will be reduced in future stable releases.
+For additional debugging, enable `debug_logging: true` in the configuration to see detailed API calls and diagnostic information.
 
 ## Support
 
@@ -332,7 +315,27 @@ RV Link requires:
 - `hassio_role: manager` - To install and configure other add-ons
 - `map: share:rw` - To deploy Node-RED flows to shared storage
 
-Note: Node-RED's settings.js is modified using init_commands that run inside the Node-RED container, as direct file access is not possible across containers.
+### Init Commands Approach
+
+RV Link uses Node-RED's `init_commands` feature to configure flows at container startup:
+
+**How it works:**
+1. RV Link deploys flow files to `/share/.rv-link/` (shared storage accessible to all addons)
+2. Via Supervisor API, RV Link configures Node-RED with init_commands that run on each startup
+3. The init_commands copy the RV Link flows and inject MQTT credentials directly into the flow file
+4. This approach works around addon isolation - addons cannot directly modify each other's files
+
+**Why this approach:**
+- Home Assistant addons run in isolated containers with separate filesystems
+- Direct file access between containers is not possible
+- Init_commands execute inside the target container with proper permissions
+- Ensures flows are always synchronized with the latest version deployed by RV Link
+
+**Technical details:**
+- Init_commands run as shell commands during Node-RED container startup
+- Commands copy files from `/share/.rv-link/` to `/config/` (Node-RED's data volume)
+- Uses `jq` to inject MQTT broker configuration and credentials into flows
+- Environment variables provide MQTT connection details to the flows
 
 ### API Usage
 

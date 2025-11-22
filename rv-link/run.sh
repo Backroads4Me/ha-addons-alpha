@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.56"
+ADDON_VERSION="0.6.60"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -32,7 +32,30 @@ MQTT_USER=$(bashio::config 'mqtt_user')
 MQTT_PASS=$(bashio::config 'mqtt_pass')
 DEBUG_LOGGING=$(bashio::config 'debug_logging')
 
-# ======================== 
+# ========================
+# Input Validation
+# ========================
+# Validate CAN interface name (alphanumeric only)
+if [[ ! "$CAN_INTERFACE" =~ ^[a-z0-9]+$ ]]; then
+    bashio::log.fatal "Invalid CAN interface name: $CAN_INTERFACE"
+    bashio::log.fatal "Must contain only lowercase letters and numbers (e.g., can0, vcan0)"
+    exit 1
+fi
+
+# Validate MQTT user doesn't contain dangerous characters
+if [[ "$MQTT_USER" =~ [\"\'\\] ]]; then
+    bashio::log.fatal "Invalid MQTT username: contains quotes or backslashes"
+    exit 1
+fi
+
+# Validate bitrate is a valid number
+if [[ ! "$CAN_BITRATE" =~ ^[0-9]+$ ]]; then
+    bashio::log.fatal "Invalid CAN bitrate: $CAN_BITRATE"
+    bashio::log.fatal "Must be a number (125000, 250000, 500000, or 1000000)"
+    exit 1
+fi
+
+# ========================
 # Orchestrator Helpers
 # ======================== 
 log_debug() {
@@ -213,13 +236,15 @@ wait_for_mqtt() {
 
   bashio::log.info "   > Waiting for MQTT broker at $host:$port..."
 
-  local auth_args=""
-  [ -n "$user" ] && auth_args="$auth_args -u $user"
-  [ -n "$pass" ] && auth_args="$auth_args -P $pass"
-
   local retries=30
   while [ $retries -gt 0 ]; do
-    if timeout 2 mosquitto_pub -h "$host" -p "$port" $auth_args -t "rvlink/test" -m "test" -q 0 2>/dev/null; then
+    # Build command with proper quoting
+    local cmd="timeout 2 mosquitto_pub -h \"$host\" -p \"$port\""
+    [ -n "$user" ] && cmd="$cmd -u \"$user\""
+    [ -n "$pass" ] && cmd="$cmd -P \"$pass\""
+    cmd="$cmd -t \"rvlink/test\" -m \"test\" -q 0 2>/dev/null"
+
+    if eval "$cmd"; then
       bashio::log.info "   ✅ MQTT broker is ready"
       return 0
     fi
@@ -240,7 +265,7 @@ wait_for_nodered_api() {
   
   while [ $retries -gt 0 ]; do
     local url="http://${host}:${port}/"
-    log_debug "   [DEBUG] Checking for Node-RED API at $url"
+    log_debug "Checking for Node-RED API at $url"
     
     # Check if the port is open, without requiring auth yet.
     # A 401 error will still return 0 here, which is what we want.
@@ -263,9 +288,6 @@ deploy_nodered_flows() {
   bashio::log.info "   > Triggering Node-RED flow deployment..."
   
   local host="a0d7b954-nodered"
-  if [ -f /tmp/nodered_host ]; then
-    host=$(cat /tmp/nodered_host)
-  fi
   local base_url="http://${host}:1880"
   
   # FETCH PHASE: Retry until Node-RED is fully ready
@@ -281,7 +303,7 @@ deploy_nodered_flows() {
         break
       fi
     fi
-    log_debug "   [DEBUG] Node-RED API not ready yet. Retrying in 3s... ($retries attempts left)"
+    log_debug "Node-RED API not ready yet. Retrying in 3s... ($retries attempts left)"
     sleep 3
     ((retries--))
   done
@@ -360,16 +382,19 @@ bashio::log.info "📋 Phase 0: Deploying Files"
 mkdir -p "$PROJECT_PATH"
 
 # Always deploy/update project files from bundled version
-if [ "$(ls -A $PROJECT_PATH)" ]; then
+if [ "$(ls -A "$PROJECT_PATH")" ]; then
     bashio::log.info "   🔄 Updating project files from bundled version..."
 else
     bashio::log.info "   📦 Deploying bundled project to $PROJECT_PATH..."
 fi
 
 # Deploy project files
-rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
-# Ensure permissions are open (Node-RED runs as non-root)
-chmod -R 777 "$PROJECT_PATH"
+rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/" || {
+    bashio::log.error "   ❌ Failed to deploy project files"
+    exit 1
+}
+# Set secure permissions (readable by all, writable by owner)
+chmod -R 755 "$PROJECT_PATH"
 bashio::log.info "   ✅ Project files deployed"
 
 
@@ -399,6 +424,9 @@ set_boot_auto "$SLUG_MOSQUITTO" || bashio::log.warning "   ⚠️  Could not set
 # Both Node-RED and CAN-MQTT Bridge will use these credentials
 bashio::log.info "   ⚙️  Ensuring 'rvlink' user exists in Mosquitto..."
 # MQTT_USER and MQTT_PASS are read from config at the top
+# MQTT_HOST: Use "core-mosquitto" for internal addon-to-addon connections
+# Note: Node-RED flows use "homeassistant" hostname which is a DNS alias
+# provided by Home Assistant Supervisor that resolves to the same service
 MQTT_HOST="core-mosquitto"
 MQTT_PORT=1883
 
@@ -417,8 +445,13 @@ if [ -z "$NEW_MOSQUITTO_OPTIONS" ] || [ "$NEW_MOSQUITTO_OPTIONS" == "null" ]; th
     exit 1
 fi
 
-api_call POST "/addons/$SLUG_MOSQUITTO/options" "{\"options\": $NEW_MOSQUITTO_OPTIONS}" > /dev/null
-bashio::log.info "   ✅ Configured Mosquitto user: $MQTT_USER"
+result=$(api_call POST "/addons/$SLUG_MOSQUITTO/options" "{\"options\": $NEW_MOSQUITTO_OPTIONS}")
+if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
+    bashio::log.info "   ✅ Configured Mosquitto user: $MQTT_USER"
+else
+    bashio::log.error "   ❌ Failed to configure Mosquitto user: $(echo "$result" | jq -r '.message')"
+    exit 1
+fi
 
 # Restart Mosquitto to apply new user
 if is_running "$SLUG_MOSQUITTO"; then
@@ -483,7 +516,7 @@ result=$(api_call POST "/addons/$SLUG_CAN_BRIDGE/options" "$CAN_BRIDGE_CONFIG")
 if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
     bashio::log.info "   ✅ CAN-MQTT Bridge configured"
 else
-    bashio::log.error "   ⚠️  Failed to configure CAN-MQTT Bridge: $(echo "$result" | jq -r '.message')"
+    bashio::log.error "   ❌ Failed to configure CAN-MQTT Bridge: $(echo "$result" | jq -r '.message')"
 fi
 
 # Set CAN-MQTT Bridge to start on boot
@@ -534,6 +567,14 @@ if [ "$NODERED_ALREADY_INSTALLED" = "true" ]; then
   if is_nodered_managed; then
     MANAGED_VERSION=$(get_managed_version)
     bashio::log.info "   ✅ Node-RED already managed by RV Link (version $MANAGED_VERSION)"
+
+    # Check if RV Link version has changed - need to update flows
+    if [ "$MANAGED_VERSION" != "$ADDON_VERSION" ]; then
+      bashio::log.info "   🔄 RV Link version changed ($MANAGED_VERSION → $ADDON_VERSION)"
+      bashio::log.info "   > Restarting Node-RED to apply updated flows..."
+      restart_addon "$SLUG_NODERED" || exit 1
+      bashio::log.info "   ✅ Node-RED restarted with updated flows"
+    fi
   else
     # Node-RED exists but not managed by RV Link - need permission
     if [ "$CONFIRM_TAKEOVER" != "true" ]; then
@@ -565,7 +606,8 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 # 2. Copy the essential 'rvc' directory into the project space.
 # 3. Use jq to modify the source flows.json:
 #    - It finds the 'mqtt-broker' node.
-#    - It overwrites the broker and credentials to use environment variables.
+#    - It overwrites the broker and credentials.
+#    - Uses "homeassistant" hostname (HA Supervisor DNS alias for MQTT service)
 #    - The output is written directly to the default /config/flows.json location.
 SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red/rvc; cp -r /share/.rv-link/rvc/. /config/projects/rv-link-node-red/rvc/; jq '(.[] | select(.type == \"mqtt-broker\")) |= . + {\"broker\": \"mqtt://homeassistant:1883\", \"credentials\": {\"user\": \"${MQTT_USER}\", \"password\": \"${MQTT_PASS}\"}}' /share/.rv-link/flows.json > /config/flows.json"
 
@@ -626,12 +668,14 @@ if [ "$NEEDS_RESTART" = "true" ]; then
   else
     bashio::log.info "   > Starting Node-RED with new configuration..."
     start_addon "$SLUG_NODERED" || exit 1
-    
+
     # Force a restart after fresh start to fix race condition:
     # On first boot, Node-RED's initialization may interfere with init_commands.
+    # The init_commands need to run after Node-RED creates its data directories.
     # A restart ensures init_commands run cleanly on an initialized volume.
+    # Using 10 second delay to allow full initialization on slower hardware.
     bashio::log.info "   > Performing initialization restart to ensure init_commands take effect..."
-    sleep 5
+    sleep 10
     restart_addon "$SLUG_NODERED" || exit 1
   fi
 else
@@ -677,5 +721,5 @@ bashio::log.info "🚐 See the Overview Dashboard for new RV Link entities"
 bashio::log.info "🚐 Visit https://rvlink.app for more information"
 bashio::log.info ""
 bashio::log.info "   ℹ️  RV Link setup complete. The addon will now exit."
-bashio::log.info "   ℹ️  Restart this addon only when updating RV Link."
+bashio::log.info "   ℹ️  You only need to restart this addon when updating RV Link."
 bashio::log.info ""
