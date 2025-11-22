@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.55"
+ADDON_VERSION="0.6.56"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -294,11 +294,12 @@ deploy_nodered_flows() {
   bashio::log.info "   ✅ Node-RED API ready. Deploying flows..."
 
   # DEPLOY PHASE: Use "full" deployment for complete node restart
+  # Use stdin to avoid "Argument list too long" error with large flows
   local deploy_response
-  deploy_response=$(curl -s -w "\n%{http_code}" --user "$MQTT_USER:$MQTT_PASS" -m 10 -X POST \
+  deploy_response=$(echo "$flows" | curl -s -w "\n%{http_code}" --user "$MQTT_USER:$MQTT_PASS" -m 10 -X POST \
     -H "Content-Type: application/json" \
     -H "Node-RED-Deployment-Type: full" \
-    -d "$flows" \
+    -d @- \
     "${base_url}/flows" 2>&1)
 
   local http_code=$(echo "$deploy_response" | tail -n1)

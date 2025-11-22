@@ -1,3 +1,9 @@
+## [0.6.56] - 2025-11-22
+
+### Fixed
+
+- Flow deployment "Argument list too long" error by piping flows data to curl via stdin instead of command-line argument
+
 ## [0.6.55] - 2025-11-22
 
 ### Fixed
