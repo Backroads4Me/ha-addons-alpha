@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.60"
+ADDON_VERSION="0.6.62"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -609,7 +609,7 @@ SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 #    - It overwrites the broker and credentials.
 #    - Uses "homeassistant" hostname (HA Supervisor DNS alias for MQTT service)
 #    - The output is written directly to the default /config/flows.json location.
-SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red/rvc; cp -r /share/.rv-link/rvc/. /config/projects/rv-link-node-red/rvc/; jq '(.[] | select(.type == \"mqtt-broker\")) |= . + {\"broker\": \"mqtt://homeassistant:1883\", \"credentials\": {\"user\": \"${MQTT_USER}\", \"password\": \"${MQTT_PASS}\"}}' /share/.rv-link/flows.json > /config/flows.json"
+SETTINGS_INIT_CMD="mkdir -p /config/projects/rv-link-node-red/rvc; cp -r /share/.rv-link/rvc/. /config/projects/rv-link-node-red/rvc/; jq 'map(if .type == \"mqtt-broker\" then . + {\"broker\": \"mqtt://homeassistant:1883\", \"credentials\": {\"user\": \"${MQTT_USER}\", \"password\": \"${MQTT_PASS}\"}} else . end)' /share/.rv-link/flows.json > /config/flows.json"
 
 NEEDS_RESTART=false
 
@@ -638,10 +638,12 @@ if [ -z "$SECRET" ]; then
   NEEDS_RESTART=true
 else
   CURRENT_INIT_CMD=$(echo "$NR_OPTIONS" | jq -r '.init_commands[0] // empty')
-  CURRENT_USER=$(echo "$NR_OPTIONS" | jq -r --arg user "$MQTT_USER" '.users[] | select(.username == $user) | .username')
+  CURRENT_USER=$(echo "$NR_OPTIONS" | jq -r --arg user "$MQTT_USER" '(.users // [])[] | select(.username == $user) | .username')
   
   # Check if config needs updating (init command changed, user missing, or env vars different)
-  if [ "$CURRENT_INIT_CMD" != "$SETTINGS_INIT_CMD" ] || [ -z "$CURRENT_USER" ] || [ "$(echo "$NR_OPTIONS" | jq '.env_vars')" != "$MQTT_ENV_VARS" ]; then
+  # Use '.env_vars // []' to handle null case (returns empty array if null)
+  CURRENT_ENV_VARS=$(echo "$NR_OPTIONS" | jq '.env_vars // []')
+  if [ "$CURRENT_INIT_CMD" != "$SETTINGS_INIT_CMD" ] || [ -z "$CURRENT_USER" ] || [ "$CURRENT_ENV_VARS" != "$MQTT_ENV_VARS" ]; then
     bashio::log.info "   > Updating Node-RED configuration (init commands / users / env_vars)..."
     NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq \
       --arg initcmd "$SETTINGS_INIT_CMD" \

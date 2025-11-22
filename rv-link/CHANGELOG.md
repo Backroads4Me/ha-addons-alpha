@@ -1,3 +1,17 @@
+## [0.6.62] - 2025-11-22
+
+### Fixed
+
+- jq error "Cannot iterate over null" in init_commands when processing flows.json
+- Changed jq flow processing from select/update operator to map/if-then-else for better null handling
+
+## [0.6.61] - 2025-11-22
+
+### Fixed
+
+- jq error "Cannot iterate over null" when checking Node-RED env_vars or users fields that don't exist yet
+- Added proper null handling for .env_vars and .users fields in Node-RED configuration checks
+
 ## [0.6.60] - 2025-11-22
 
 ### Fixed
