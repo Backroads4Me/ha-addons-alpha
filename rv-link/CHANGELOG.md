@@ -1,3 +1,10 @@
+## [0.6.55] - 2025-11-22
+
+### Fixed
+
+- Node-RED flow deployment using correct deployment type ("full" instead of invalid "reload")
+- Improved error handling in deployment function to capture and log HTTP status codes
+
 ## [0.6.48] - 2025-11-21
 
 ### Fixed

@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.48"
+ADDON_VERSION="0.6.55"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -292,20 +292,27 @@ deploy_nodered_flows() {
   fi
   
   bashio::log.info "   ✅ Node-RED API ready. Deploying flows..."
-  
+
   # DEPLOY PHASE: Use "full" deployment for complete node restart
-  if curl -s -f --user "$MQTT_USER:$MQTT_PASS" -m 10 -X POST \
+  local deploy_response
+  deploy_response=$(curl -s -w "\n%{http_code}" --user "$MQTT_USER:$MQTT_PASS" -m 10 -X POST \
     -H "Content-Type: application/json" \
-    -H "Node-RED-Deployment-Type: reload" \
+    -H "Node-RED-Deployment-Type: full" \
     -d "$flows" \
-    "${base_url}/flows" >/dev/null 2>&1; then
-    
+    "${base_url}/flows" 2>&1)
+
+  local http_code=$(echo "$deploy_response" | tail -n1)
+  local response_body=$(echo "$deploy_response" | sed '$d')
+
+  if [ "$http_code" = "204" ] || [ "$http_code" = "200" ]; then
     bashio::log.info "   ✅ Node-RED flows deployed successfully"
     # Give MQTT nodes time to establish connections
     sleep 5
     return 0
   else
-    bashio::log.warning "   ⚠️  Failed to deploy flows. You may need to click Deploy manually."
+    bashio::log.warning "   ⚠️  Failed to deploy flows. HTTP $http_code"
+    log_debug "Deploy response: $response_body"
+    bashio::log.warning "   You may need to click Deploy manually."
     return 1
   fi
 }
