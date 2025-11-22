@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.62"
+ADDON_VERSION="0.6.63"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -258,30 +258,45 @@ wait_for_mqtt() {
 
 wait_for_nodered_api() {
   bashio::log.info "   > Waiting for Node-RED API to be ready..."
-  
+
   local host="a0d7b954-nodered"
   local port=1880
+  local base_url="http://${host}:${port}"
   local retries=60
-  
+
+  # Phase 1: Wait for port to open
   while [ $retries -gt 0 ]; do
-    local url="http://${host}:${port}/"
-    log_debug "Checking for Node-RED API at $url"
-    
-    # Check if the port is open, without requiring auth yet.
-    # A 401 error will still return 0 here, which is what we want.
-    if curl -sS -m 3 "$url" >/dev/null 2>&1; then
-      bashio::log.info "   ✅ Node-RED API port is open. Waiting for auth to initialize..."
-      # Give Node-RED a moment to initialize the user auth system
-      sleep 5
-      return 0
+    log_debug "Checking if Node-RED port is open..."
+    if curl -sS -m 3 "$base_url/" >/dev/null 2>&1; then
+      bashio::log.info "   ✅ Node-RED API port is open. Waiting for authentication to initialize..."
+      break
     fi
-    
     sleep 3
     ((retries--))
   done
 
-  bashio::log.error "   ❌ Node-RED API did not become available at $url"
-  return 1
+  if [ $retries -eq 0 ]; then
+    bashio::log.error "   ❌ Node-RED API port did not open"
+    return 1
+  fi
+
+  # Phase 2: Wait for authenticated requests to work
+  # After init_commands run, Node-RED needs time to initialize auth
+  retries=30
+  while [ $retries -gt 0 ]; do
+    log_debug "Testing authenticated API access..."
+    # Try to access /flows endpoint with auth - should return 200 or 401, not connection error
+    if curl -s -f -m 3 --user "$MQTT_USER:$MQTT_PASS" "${base_url}/flows" >/dev/null 2>&1; then
+      bashio::log.info "   ✅ Node-RED API authenticated and ready"
+      return 0
+    fi
+    sleep 2
+    ((retries--))
+  done
+
+  bashio::log.warning "   ⚠️  Node-RED API authentication not ready after 60 seconds"
+  bashio::log.warning "   Continuing anyway - deployment may need manual intervention"
+  return 0  # Don't fail hard, just warn
 }
 
 deploy_nodered_flows() {

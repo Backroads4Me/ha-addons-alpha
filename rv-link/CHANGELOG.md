@@ -1,3 +1,11 @@
+## [0.6.63] - 2025-11-22
+
+### Fixed
+
+- Flow deployment timeout when init_commands change - improved wait_for_nodered_api to verify authenticated access works
+- Added two-phase readiness check: port availability, then authenticated API access
+- Prevents 45-second timeout failures when Node-RED is still initializing after config changes
+
 ## [0.6.62] - 2025-11-22
 
 ### Fixed
