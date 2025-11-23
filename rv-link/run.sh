@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.56"
+ADDON_VERSION="0.6.57"
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -194,11 +194,11 @@ restart_addon() {
 
 set_boot_auto() {
   local slug=$1
-  bashio::log.info "   > Setting $slug to start on boot..."
+  bashio::log.info "   > Setting $slug to start on boot with watchdog..."
   local result
-  result=$(api_call POST "/addons/$slug/options" '{"boot":"auto"}')
+  result=$(api_call POST "/addons/$slug/options" '{"boot":"auto","watchdog":true}')
   if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
-    bashio::log.info "   ✅ $slug will start on boot"
+    bashio::log.info "   ✅ $slug will start on boot with watchdog enabled"
   else
     bashio::log.warning "   ⚠️  Failed to set boot option for $slug: $(echo "$result" | jq -r '.message')"
     return 1
@@ -240,7 +240,7 @@ wait_for_nodered_api() {
   
   while [ $retries -gt 0 ]; do
     local url="http://${host}:${port}/"
-    log_debug "   [DEBUG] Checking for Node-RED API at $url"
+    log_debug "Checking for Node-RED API at $url"
     
     # Check if the port is open, without requiring auth yet.
     # A 401 error will still return 0 here, which is what we want.
@@ -281,7 +281,7 @@ deploy_nodered_flows() {
         break
       fi
     fi
-    log_debug "   [DEBUG] Node-RED API not ready yet. Retrying in 3s... ($retries attempts left)"
+    log_debug "Node-RED API not ready yet. Retrying in 3s... ($retries attempts left)"
     sleep 3
     ((retries--))
   done
@@ -677,5 +677,5 @@ bashio::log.info "🚐 See the Overview Dashboard for new RV Link entities"
 bashio::log.info "🚐 Visit https://rvlink.app for more information"
 bashio::log.info ""
 bashio::log.info "   ℹ️  RV Link setup complete. The addon will now exit."
-bashio::log.info "   ℹ️  Restart this addon only when updating RV Link."
+bashio::log.info "   You only need to restart this addon when updating RV Link."
 bashio::log.info ""

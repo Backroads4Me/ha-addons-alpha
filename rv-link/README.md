@@ -1,12 +1,10 @@
 # RV Link - Complete RV Control System
 
-**One Add-on to Rule Them All.**
-
-RV Link is the all-in-one solution for integrating your RV's CAN bus with Home Assistant. It acts as a **System Orchestrator**, automatically setting up the entire environment for you.
+RV Link is the all-in-one solution for integrating your RV's RV-C network with Home Assistant. It acts as a **System Orchestrator**, automatically setting up the entire environment for you.
 
 ## ✨ Features
 
--   **🔌 Hardware Bridge**: Connects directly to your USB-CAN adapter (e.g., CandleLight, Toucan) and bridges RV-C traffic to MQTT.
+-   **🔌 Hardware Bridge**: Connects directly to your CAN interface (e.g., Waveshare CAN HAT on Raspberry Pi 5) and bridges RV-C network traffic to MQTT.
 -   **🧠 System Orchestrator**: Automatically installs and configures the official **Mosquitto Broker** and **Node-RED**.
 -   **📦 Project Bundler**: Comes with the `rv-link-node-red` automation project pre-bundled. No Git required!
 -   **🛡️ Safety First**: Respects your existing Node-RED flows and asks permission before taking over.
@@ -48,11 +46,10 @@ If you already have Node-RED installed:
 
 | Option | Default | Description |
 | :--- | :--- | :--- |
-| `can_interface` | `can0` | The network interface of your USB-CAN adapter. |
-| `can_bitrate` | `250000` | Bitrate of your RV-C bus (usually 250k). |
+| `can_interface` | `can0` | The network interface of your CAN hardware (e.g., can0 for Waveshare CAN HAT). |
+| `can_bitrate` | `250000` | Bitrate of your RV-C network (usually 250k). |
 | `confirm_nodered_takeover` | `false` | **Safety Switch**: Set to `true` to allow RV Link to replace existing Node-RED flows. |
 
 ## 📚 Support
 
--   **Issues**: [GitHub Issues](https://github.com/Backroads4Me/ha-addons/issues)
--   **Project**: [RV Link Node-RED](https://github.com/Backroads4Me/rv-link-node-red)
+-   **Documentation & Support**: [rvlink.app](https://rvlink.app)

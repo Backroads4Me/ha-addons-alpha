@@ -1,3 +1,17 @@
+## [0.6.57] - 2025-11-23
+
+### Changed
+
+- Final status message simplified for clarity
+- Watchdog mode enabled for all auto-start addons (Mosquitto, Node-RED, CAN-MQTT Bridge)
+- Documentation updated to reference Raspberry Pi 5 and Waveshare CAN HAT as primary hardware
+- Support links updated to point to rvlink.app
+
+### Fixed
+
+- Redundant debug message prefixes removed
+- Documentation updated to use "RV-C network" terminology consistently
+
 ## [0.6.56] - 2025-11-22
 
 ### Fixed

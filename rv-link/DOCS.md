@@ -33,7 +33,7 @@ RV Link automatically configures Node-RED to use the shared flow file at `/share
 
 ### Hardware
 
-- **CAN Bus Interface**: USB-CAN adapter (e.g., CandleLight, Toucan, etc.)
+- **RV-C Network Interface**: CAN interface such as Waveshare CAN HAT on Raspberry Pi 5
   - Note: CAN hardware is essential for the system to function
 
 ### Software
@@ -41,7 +41,7 @@ RV Link automatically configures Node-RED to use the shared flow file at `/share
 RV Link automatically installs these if missing:
 - **Mosquitto Broker** (Official add-on) - MQTT message bus
 - **Node-RED** (Community add-on) - Flow-based automation
-- **CAN-MQTT Bridge** (Custom add-on) - Bidirectional CAN bus bridge
+- **CAN-MQTT Bridge** (Custom add-on) - Bidirectional RV-C network to MQTT bridge
 
 ## Configuration Options
 
@@ -52,7 +52,7 @@ Access configuration: Settings → Add-ons → RV Link → Configuration
 **Type**: String
 **Default**: `can0`
 
-The network interface name of your USB-CAN adapter.
+The network interface name of your CAN hardware (e.g., can0 for Waveshare CAN HAT).
 
 **Example**:
 ```yaml
@@ -64,7 +64,7 @@ can_interface: can0
 **Type**: Integer
 **Default**: `250000`
 
-The bitrate of your RV-C bus. Most RVs use 250kbps.
+The bitrate of your RV-C network. Most RVs use 250kbps.
 
 **Options**: `125000`, `250000`, `500000`, `1000000`
 
@@ -126,7 +126,7 @@ If you need to adjust CAN interface or other settings:
 
 ### Step 4: Connect CAN Hardware
 
-1. Connect your USB-CAN adapter (e.g., CandleLight, Toucan)
+1. Connect your CAN interface (e.g., Waveshare CAN HAT on Raspberry Pi 5)
 2. Verify it appears as `can0` (or adjust `can_interface` config)
 
 **Note**: The CAN-MQTT Bridge addon will fail to start without CAN hardware, but system orchestration will succeed.
@@ -206,7 +206,7 @@ RV Link manages flows in two locations:
 **Cause**: No CAN hardware detected or wrong interface name.
 
 **Solution**:
-1. Verify USB-CAN adapter is connected
+1. Verify CAN interface hardware is connected (e.g., Waveshare CAN HAT on Raspberry Pi 5)
 2. Check CAN-MQTT Bridge addon logs for details
 3. Update `can_interface` config in RV Link if not `can0`
 4. Restart both RV Link and CAN-MQTT Bridge addons after connecting hardware
@@ -312,9 +312,7 @@ This verbose logging will be reduced in future stable releases.
 
 ## Support
 
-- **Issues**: https://github.com/Backroads4Me/ha-addons/issues
-- **Project Repo**: https://github.com/Backroads4Me/rv-link-node-red
-- **Discussions**: GitHub Discussions in the repository
+- **Documentation & Support**: https://rvlink.app
 
 ## Technical Details
 
@@ -323,7 +321,7 @@ This verbose logging will be reduced in future stable releases.
 RV Link acts as a pure orchestrator that installs and configures three separate addons:
 1. **Mosquitto** - MQTT broker for message routing
 2. **Node-RED** - Flow-based automation with RV Link flows
-3. **CAN-MQTT Bridge** - Bidirectional CAN bus to MQTT bridge
+3. **CAN-MQTT Bridge** - Bidirectional RV-C network to MQTT bridge
 
 ### Permissions
 
@@ -355,5 +353,5 @@ Note: This uses Node-RED's flowFile setting rather than projects mode, simplifyi
 **Q: Can I modify the flows after deployment?**
 A: You can modify flows in the Node-RED UI, but changes will be overwritten when RV Link updates. To use your own flows permanently, see "Using Node-RED Independently" in the Advanced Usage section.
 
-**Q: How do I contribute flow improvements?**
-A: Submit issues or pull requests to the flows repository at https://github.com/Backroads4Me/rv-link-node-red.
+**Q: How do I get help or provide feedback?**
+A: Visit https://rvlink.app for documentation and support.
