@@ -1,3 +1,9 @@
+## [0.7.13] - 2025-11-23
+
+### Changed
+
+- Documentation
+
 ## [0.7.0] - 2025-11-23
 
 ### Working snapshot
