@@ -13,10 +13,10 @@ RUN apk add --no-cache \
     bash \
     rsync \
     mosquitto-clients \
-    procps \
     coreutils \
     openssl \
-    ca-certificates
+    ca-certificates \
+    && rm -rf /var/cache/apk/*
 
 # Bundle the Node-RED Project
 # Always pulls latest from main branch

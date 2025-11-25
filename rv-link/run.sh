@@ -20,7 +20,7 @@ SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
-ADDON_VERSION="0.6.57"
+ADDON_VERSION=$(bashio::addon.version)
 
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
@@ -369,7 +369,7 @@ fi
 # Deploy project files
 rsync -a --delete "$BUNDLED_PROJECT/" "$PROJECT_PATH/"
 # Ensure permissions are open (Node-RED runs as non-root)
-chmod -R 777 "$PROJECT_PATH"
+chmod -R 755 "$PROJECT_PATH"
 bashio::log.info "   ✅ Project files deployed"
 
 

@@ -1,3 +1,15 @@
+## [0.7.14] - 2025-11-25
+
+### Changed
+
+- Version now retrieved dynamically from config.yaml
+- Removed unused procps dependency from Dockerfile
+- Added apk cache cleanup to reduce Docker image size
+
+### Fixed
+
+- File permissions changed from 777 to 755 for improved security
+
 ## [0.7.13] - 2025-11-23
 
 ### Changed
