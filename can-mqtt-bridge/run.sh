@@ -18,6 +18,7 @@ mkdir -p /var/run/s6/healthcheck
 # ========================
 CAN_INTERFACE=$(bashio::config 'can_interface')
 CAN_BITRATE=$(bashio::config 'can_bitrate')
+EXPECTED_OSCILLATOR=$(bashio::config 'expected_oscillator')
 
 # Try to use service discovery for MQTT broker
 if bashio::services.available "mqtt"; then
@@ -160,10 +161,126 @@ if [ -f "/sys/class/net/$CAN_INTERFACE/operstate" ] && [ "$(cat "/sys/class/net/
     ip link set "$CAN_INTERFACE" down
 fi
 
-# Set up CAN interface with bitrate (exact copy from working add-on)
-bashio::log.info "Setting up CAN interface with bitrate $CAN_BITRATE"
-if ! ip link set "$CAN_INTERFACE" up type can bitrate "$CAN_BITRATE"; then
-    bashio::log.fatal "Failed to set CAN interface up with bitrate $CAN_BITRATE"
+# ========================
+# Oscillator Frequency Detection & Compensation
+# ========================
+detect_and_compensate_oscillator() {
+    local requested_bitrate=$1
+    local interface=$2
+
+    bashio::log.info "Checking for oscillator frequency mismatch..."
+
+    # Get detailed interface information without changing state
+    local can_details
+    can_details=$(ip -details link show "$interface" 2>/dev/null)
+
+    if [ -z "$can_details" ]; then
+        bashio::log.warning "Could not retrieve interface details - skipping oscillator check"
+        echo "$requested_bitrate"
+        return 0
+    fi
+
+    # Extract clock frequency using BusyBox-compatible sed
+    local driver_clock
+    driver_clock=$(echo "$can_details" | sed -n 's/.*clock \([0-9]*\).*/\1/p' | head -n1)
+
+    if [ -z "$driver_clock" ] || [ "$driver_clock" -eq 0 ] 2>/dev/null; then
+        bashio::log.warning "Could not detect driver clock frequency - skipping oscillator check"
+        echo "$requested_bitrate"
+        return 0
+    fi
+
+    bashio::log.info "Detected driver clock: ${driver_clock} Hz"
+
+    # Determine expected oscillator frequency
+    local expected_oscillator
+
+    # Check if user manually configured expected oscillator
+    if [ -n "$EXPECTED_OSCILLATOR" ] && [ "$EXPECTED_OSCILLATOR" -gt 0 ] 2>/dev/null; then
+        expected_oscillator=$EXPECTED_OSCILLATOR
+        bashio::log.info "Using configured expected oscillator: ${expected_oscillator} Hz"
+    else
+        # Auto-infer expected oscillator from common standards
+        local common_freqs="8000000 16000000 20000000"
+
+        # If driver clock matches a common frequency, assume it's correct
+        if echo "$common_freqs" | grep -qw "$driver_clock"; then
+            bashio::log.info "Driver clock matches standard oscillator frequency - no compensation needed"
+            echo "$requested_bitrate"
+            return 0
+        fi
+
+        # Infer expected oscillator based on common misconfigurations
+        if [ "$driver_clock" -eq 8000000 ]; then
+            # Most common bug: 16MHz hardware detected as 8MHz
+            expected_oscillator=16000000
+            bashio::log.info "Inferred expected oscillator: ${expected_oscillator} Hz (common 8MHz→16MHz bug)"
+        elif [ "$driver_clock" -eq 4000000 ]; then
+            # Less common: 8MHz hardware detected as 4MHz
+            expected_oscillator=8000000
+            bashio::log.info "Inferred expected oscillator: ${expected_oscillator} Hz"
+        else
+            # Unknown configuration - default to 16MHz (most common for Waveshare HATs)
+            expected_oscillator=16000000
+            bashio::log.warning "Unusual driver clock ${driver_clock} Hz - defaulting to 16MHz oscillator"
+            bashio::log.warning "If this doesn't work, set expected_oscillator manually in config"
+        fi
+    fi
+
+    # Calculate compensation factor
+    local compensation_factor
+    compensation_factor=$(awk "BEGIN {printf \"%.6f\", $expected_oscillator / $driver_clock}")
+
+    # Only compensate if factor is not approximately 1.0
+    if awk "BEGIN {exit !($compensation_factor >= 0.99 && $compensation_factor <= 1.01)}"; then
+        bashio::log.info "Compensation factor ${compensation_factor} is close to 1.0 - no compensation needed"
+        echo "$requested_bitrate"
+        return 0
+    fi
+
+    # Calculate compensated bitrate
+    local compensated_bitrate
+    compensated_bitrate=$(awk "BEGIN {printf \"%.0f\", $requested_bitrate / $compensation_factor}")
+
+    # Validate compensated bitrate is reasonable (between 10 kbps and 1 Mbps)
+    if [ "$compensated_bitrate" -lt 10000 ] || [ "$compensated_bitrate" -gt 1000000 ]; then
+        bashio::log.error "Calculated compensated bitrate ${compensated_bitrate} is out of valid range"
+        bashio::log.error "Driver clock: ${driver_clock} Hz, Expected: ${expected_oscillator} Hz"
+        bashio::log.error "Requested: ${requested_bitrate} bps, Factor: ${compensation_factor}"
+        bashio::log.error "Using requested bitrate without compensation - CAN bus may not work correctly!"
+        echo "$requested_bitrate"
+        return 1
+    fi
+
+    # Log the compensation
+    bashio::log.info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    bashio::log.info "Oscillator Frequency Mismatch Detected - Auto-Compensating"
+    bashio::log.info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    bashio::log.info "Expected oscillator frequency: ${expected_oscillator} Hz ($(awk "BEGIN {printf \"%.0f\", $expected_oscillator/1000000}") MHz)"
+    bashio::log.info "Driver configured frequency:   ${driver_clock} Hz ($(awk "BEGIN {printf \"%.0f\", $driver_clock/1000000}") MHz)"
+    bashio::log.info "Compensation factor:           ${compensation_factor}x"
+    bashio::log.info "Requested bitrate:             ${requested_bitrate} bps"
+    bashio::log.info "Compensated bitrate:           ${compensated_bitrate} bps"
+    bashio::log.info "Actual CAN bus speed:          ${requested_bitrate} bps (after compensation)"
+    bashio::log.info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Return compensated bitrate
+    echo "$compensated_bitrate"
+    return 0
+}
+
+# Detect oscillator mismatch and calculate compensated bitrate if needed
+EFFECTIVE_BITRATE=$(detect_and_compensate_oscillator "$CAN_BITRATE" "$CAN_INTERFACE")
+
+# Set up CAN interface with effective bitrate (may be compensated)
+if [ "$EFFECTIVE_BITRATE" != "$CAN_BITRATE" ]; then
+    bashio::log.info "Setting up CAN interface with compensated bitrate $EFFECTIVE_BITRATE (target: $CAN_BITRATE)"
+else
+    bashio::log.info "Setting up CAN interface with bitrate $CAN_BITRATE"
+fi
+
+if ! ip link set "$CAN_INTERFACE" up type can bitrate "$EFFECTIVE_BITRATE"; then
+    bashio::log.fatal "Failed to set CAN interface up with bitrate $EFFECTIVE_BITRATE"
     bashio::log.fatal "Please ensure CAN hardware is connected and recognized"
     exit 1
 fi
@@ -244,6 +361,25 @@ if [ "$DEBUG_LOGGING" = "true" ]; then
         bashio::log.info "[DEBUG] ip (iproute2) is available: $(which ip)"
     else
         bashio::log.error "[DEBUG] ip command not found!"
+    fi
+
+    # Show compensation details in debug mode
+    if [ "$EFFECTIVE_BITRATE" != "$CAN_BITRATE" ]; then
+        bashio::log.info "[DEBUG] === Oscillator Compensation Active ==="
+        bashio::log.info "[DEBUG] User requested bitrate: $CAN_BITRATE bps"
+        bashio::log.info "[DEBUG] Compensated bitrate:    $EFFECTIVE_BITRATE bps"
+        bashio::log.info "[DEBUG] Actual CAN bus speed:   $CAN_BITRATE bps (after compensation)"
+
+        # Verify actual bitrate from interface
+        if [ "$ACTUAL_BITRATE" = "$CAN_BITRATE" ]; then
+            bashio::log.info "[DEBUG] ✓ Verification: Actual bitrate matches requested!"
+        elif [ "$ACTUAL_BITRATE" = "$EFFECTIVE_BITRATE" ]; then
+            bashio::log.warning "[DEBUG] ⚠ Verification: Actual bitrate matches compensated value"
+            bashio::log.warning "[DEBUG]   This means compensation did NOT work as expected"
+            bashio::log.warning "[DEBUG]   Expected: $CAN_BITRATE, Got: $ACTUAL_BITRATE"
+        else
+            bashio::log.warning "[DEBUG] ⚠ Verification: Unexpected actual bitrate: $ACTUAL_BITRATE"
+        fi
     fi
 
     bashio::log.info "[DEBUG] ==============================================="
