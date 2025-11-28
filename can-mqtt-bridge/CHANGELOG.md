@@ -1,3 +1,9 @@
+## [1.0.13] - 2025-11-28
+
+### Fixed
+
+- Debug mode verification logic now correctly validates compensated bitrate
+
 ## [1.0.12] - 2025-11-28
 
 ### Changed

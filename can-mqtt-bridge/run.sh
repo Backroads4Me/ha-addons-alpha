@@ -371,17 +371,16 @@ if [ "$DEBUG_LOGGING" = "true" ]; then
         bashio::log.info "[DEBUG] === Oscillator Compensation Active ==="
         bashio::log.info "[DEBUG] User requested bitrate: $CAN_BITRATE bps"
         bashio::log.info "[DEBUG] Compensated bitrate:    $EFFECTIVE_BITRATE bps"
-        bashio::log.info "[DEBUG] Actual CAN bus speed:   $CAN_BITRATE bps (after compensation)"
+        bashio::log.info "[DEBUG] Expected CAN bus speed: $CAN_BITRATE bps (after hardware compensation)"
 
         # Verify actual bitrate from interface
-        if [ "$ACTUAL_BITRATE" = "$CAN_BITRATE" ]; then
-            bashio::log.info "[DEBUG] ✓ Verification: Actual bitrate matches requested!"
-        elif [ "$ACTUAL_BITRATE" = "$EFFECTIVE_BITRATE" ]; then
-            bashio::log.warning "[DEBUG] ⚠ Verification: Actual bitrate matches compensated value"
-            bashio::log.warning "[DEBUG]   This means compensation did NOT work as expected"
-            bashio::log.warning "[DEBUG]   Expected: $CAN_BITRATE, Got: $ACTUAL_BITRATE"
+        if [ "$ACTUAL_BITRATE" = "$EFFECTIVE_BITRATE" ]; then
+            bashio::log.info "[DEBUG] ✓ Verification: Interface set to compensated bitrate ($EFFECTIVE_BITRATE bps)"
+            bashio::log.info "[DEBUG] ✓ Hardware will multiply by $(awk "BEGIN {printf \"%.1f\", $CAN_BITRATE / $EFFECTIVE_BITRATE}")x → actual $CAN_BITRATE bps on CAN bus"
+            bashio::log.info "[DEBUG] ✓ If CAN frames are received, compensation is working correctly!"
         else
-            bashio::log.warning "[DEBUG] ⚠ Verification: Unexpected actual bitrate: $ACTUAL_BITRATE"
+            bashio::log.warning "[DEBUG] ⚠ Verification: Interface bitrate mismatch"
+            bashio::log.warning "[DEBUG]   Requested: $EFFECTIVE_BITRATE, Got: $ACTUAL_BITRATE"
         fi
     fi
 
