@@ -8,7 +8,11 @@
 - Periodic CAN bus statistics logging every 30 seconds in debug mode
 - Troubleshooting hints when no CAN frames are received
 - candump error output now captured and logged instead of being suppressed
-- CAN tools availability check (candump and cansend)
+- CAN tools availability check (candump, cansend, and ip)
+
+### Fixed
+
+- Parameter extraction using BusyBox-compatible sed instead of grep -P
 
 ## [1.0.0] - 2025-10-22
 

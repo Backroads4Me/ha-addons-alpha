@@ -208,10 +208,15 @@ if [ "$DEBUG_LOGGING" = "true" ]; then
             bashio::log.info "[DEBUG]   $line"
         done
 
-        # Try to extract specific CAN parameters
-        ACTUAL_BITRATE=$(echo "$CAN_DETAILS" | grep -oP 'bitrate \K[0-9]+' || echo "unknown")
-        SAMPLE_POINT=$(echo "$CAN_DETAILS" | grep -oP 'sample-point \K[0-9.]+' || echo "unknown")
-        TQ=$(echo "$CAN_DETAILS" | grep -oP 'tq \K[0-9]+' || echo "unknown")
+        # Try to extract specific CAN parameters (using BusyBox-compatible commands)
+        ACTUAL_BITRATE=$(echo "$CAN_DETAILS" | sed -n 's/.*bitrate \([0-9]*\).*/\1/p' | head -n1)
+        [ -z "$ACTUAL_BITRATE" ] && ACTUAL_BITRATE="unknown"
+
+        SAMPLE_POINT=$(echo "$CAN_DETAILS" | sed -n 's/.*sample-point \([0-9.]*\).*/\1/p' | head -n1)
+        [ -z "$SAMPLE_POINT" ] && SAMPLE_POINT="unknown"
+
+        TQ=$(echo "$CAN_DETAILS" | sed -n 's/.*tq \([0-9]*\).*/\1/p' | head -n1)
+        [ -z "$TQ" ] && TQ="unknown"
 
         bashio::log.info "[DEBUG] === Extracted CAN Parameters ==="
         bashio::log.info "[DEBUG] Actual bitrate: $ACTUAL_BITRATE bps"
@@ -225,7 +230,6 @@ if [ "$DEBUG_LOGGING" = "true" ]; then
     bashio::log.info "[DEBUG] === CAN Tools Check ==="
     if command -v candump >/dev/null 2>&1; then
         bashio::log.info "[DEBUG] candump is available: $(which candump)"
-        bashio::log.info "[DEBUG] candump version: $(candump --version 2>&1 | head -n1 || echo 'version unknown')"
     else
         bashio::log.error "[DEBUG] candump command not found!"
     fi
@@ -234,6 +238,12 @@ if [ "$DEBUG_LOGGING" = "true" ]; then
         bashio::log.info "[DEBUG] cansend is available: $(which cansend)"
     else
         bashio::log.error "[DEBUG] cansend command not found!"
+    fi
+
+    if command -v ip >/dev/null 2>&1; then
+        bashio::log.info "[DEBUG] ip (iproute2) is available: $(which ip)"
+    else
+        bashio::log.error "[DEBUG] ip command not found!"
     fi
 
     bashio::log.info "[DEBUG] ==============================================="
