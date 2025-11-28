@@ -200,21 +200,24 @@ detect_and_compensate_oscillator() {
         expected_oscillator=$EXPECTED_OSCILLATOR
         bashio::log.info "Using configured expected oscillator: ${expected_oscillator} Hz"
     else
-        # Auto-infer expected oscillator from common standards
-        local common_freqs="8000000 16000000 20000000"
+        # Auto-infer expected oscillator based on driver clock
+        # Key insight: 8MHz driver reading is almost always the bug (should be 16MHz)
 
-        # If driver clock matches a common frequency, assume it's correct
-        if echo "$common_freqs" | grep -qw "$driver_clock"; then
-            bashio::log.info "Driver clock matches standard oscillator frequency - no compensation needed"
+        if [ "$driver_clock" -eq 16000000 ] || [ "$driver_clock" -eq 20000000 ]; then
+            # 16MHz or 20MHz driver reading - assume correct, no compensation needed
+            bashio::log.info "Driver clock ${driver_clock} Hz appears correct - no compensation needed"
             echo "$requested_bitrate"
             return 0
-        fi
-
-        # Infer expected oscillator based on common misconfigurations
-        if [ "$driver_clock" -eq 8000000 ]; then
-            # Most common bug: 16MHz hardware detected as 8MHz
+        elif [ "$driver_clock" -eq 8000000 ]; then
+            # Ambiguous: could be correct 8MHz or the 16MHz bug
+            # Default to assuming it's the bug (most common) but inform user
             expected_oscillator=16000000
-            bashio::log.info "Inferred expected oscillator: ${expected_oscillator} Hz (common 8MHz→16MHz bug)"
+            bashio::log.info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            bashio::log.info "Driver reports 8 MHz clock - this is often a bug"
+            bashio::log.info "Assuming hardware is actually 16 MHz (most common)"
+            bashio::log.info "If your hardware truly has 8 MHz crystal, set:"
+            bashio::log.info "  expected_oscillator: 8000000"
+            bashio::log.info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         elif [ "$driver_clock" -eq 4000000 ]; then
             # Less common: 8MHz hardware detected as 4MHz
             expected_oscillator=8000000

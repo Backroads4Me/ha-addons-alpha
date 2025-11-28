@@ -182,18 +182,27 @@ Actual CAN bus speed:          250000 bps (after compensation)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-**Manual override (if auto-detection doesn't work):**
+**Manual override:**
 
-If auto-detection doesn't work correctly, you can manually specify the expected oscillator frequency:
+The addon assumes 8 MHz driver reading is the bug (16 MHz hardware). If you have genuine 8 MHz hardware, or if auto-detection is incorrect, manually specify:
 
 ```yaml
-expected_oscillator: 16000000  # For 16 MHz crystal
+expected_oscillator: 8000000   # For genuine 8 MHz crystal (disables compensation)
+# OR
+expected_oscillator: 16000000  # For 16 MHz crystal (forces compensation)
 ```
 
 Common values:
-- `8000000` for 8 MHz
-- `16000000` for 16 MHz (most common for Waveshare HATs)
-- `20000000` for 20 MHz
+- `8000000` for genuine 8 MHz hardware (rare)
+- `16000000` for 16 MHz (most common for Waveshare CAN HAT +)
+- `20000000` for 20 MHz (some newer modules)
+
+**How to know which is correct:**
+- **If frames are received** after startup → compensation is working correctly
+- **If no frames received** and you know other devices are transmitting:
+  1. Try setting `expected_oscillator: 8000000` (disables compensation)
+  2. Restart addon
+  3. If frames now appear → your hardware truly has 8 MHz crystal
 
 **To fix permanently:**
 

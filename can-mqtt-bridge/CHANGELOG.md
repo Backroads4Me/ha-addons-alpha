@@ -1,3 +1,18 @@
+## [1.0.12] - 2025-11-28
+
+### Changed
+
+- Improved logging when 8 MHz driver reading detected to explain assumption and override option
+- Documentation clarified how to handle genuine 8 MHz hardware vs 16 MHz bug
+- Added troubleshooting steps to test both scenarios
+
+## [1.0.11] - 2025-11-28
+
+### Fixed
+
+- Auto-detection logic now correctly treats 8 MHz driver reading as the 16 MHz bug (always compensates)
+- Only skips compensation when driver shows 16 MHz or 20 MHz
+
 ## [1.0.10] - 2025-11-28
 
 ### Fixed
