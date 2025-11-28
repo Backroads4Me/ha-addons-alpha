@@ -178,6 +178,67 @@ fi
 bashio::log.info "Final interface status:"
 ip link show "$CAN_INTERFACE"
 
+# Debug mode: Show detailed interface diagnostics
+if [ "$DEBUG_LOGGING" = "true" ]; then
+    bashio::log.info "[DEBUG] ========== CAN Interface Diagnostics =========="
+
+    # Show detailed interface information
+    if [ -d "/sys/class/net/$CAN_INTERFACE" ]; then
+        bashio::log.info "[DEBUG] Interface operstate: $(cat /sys/class/net/$CAN_INTERFACE/operstate 2>/dev/null || echo 'unknown')"
+        bashio::log.info "[DEBUG] Interface carrier: $(cat /sys/class/net/$CAN_INTERFACE/carrier 2>/dev/null || echo 'unknown')"
+
+        # Show CAN statistics if available
+        if [ -d "/sys/class/net/$CAN_INTERFACE/statistics" ]; then
+            bashio::log.info "[DEBUG] RX packets: $(cat /sys/class/net/$CAN_INTERFACE/statistics/rx_packets 2>/dev/null || echo '0')"
+            bashio::log.info "[DEBUG] TX packets: $(cat /sys/class/net/$CAN_INTERFACE/statistics/tx_packets 2>/dev/null || echo '0')"
+            bashio::log.info "[DEBUG] RX errors: $(cat /sys/class/net/$CAN_INTERFACE/statistics/rx_errors 2>/dev/null || echo '0')"
+            bashio::log.info "[DEBUG] TX errors: $(cat /sys/class/net/$CAN_INTERFACE/statistics/tx_errors 2>/dev/null || echo '0')"
+        fi
+    fi
+
+    # Show CAN-specific settings and timing parameters
+    bashio::log.info "[DEBUG] === CAN Interface Settings ==="
+    bashio::log.info "[DEBUG] Configured bitrate: $CAN_BITRATE bps"
+
+    # Extract and display CAN timing parameters from ip -details output
+    CAN_DETAILS=$(ip -details link show "$CAN_INTERFACE" 2>/dev/null)
+    if [ -n "$CAN_DETAILS" ]; then
+        bashio::log.info "[DEBUG] Full interface details:"
+        echo "$CAN_DETAILS" | while IFS= read -r line; do
+            bashio::log.info "[DEBUG]   $line"
+        done
+
+        # Try to extract specific CAN parameters
+        ACTUAL_BITRATE=$(echo "$CAN_DETAILS" | grep -oP 'bitrate \K[0-9]+' || echo "unknown")
+        SAMPLE_POINT=$(echo "$CAN_DETAILS" | grep -oP 'sample-point \K[0-9.]+' || echo "unknown")
+        TQ=$(echo "$CAN_DETAILS" | grep -oP 'tq \K[0-9]+' || echo "unknown")
+
+        bashio::log.info "[DEBUG] === Extracted CAN Parameters ==="
+        bashio::log.info "[DEBUG] Actual bitrate: $ACTUAL_BITRATE bps"
+        bashio::log.info "[DEBUG] Sample point: $SAMPLE_POINT"
+        bashio::log.info "[DEBUG] Time quantum (tq): $TQ ns"
+    else
+        bashio::log.warning "[DEBUG] Could not retrieve detailed CAN settings"
+    fi
+
+    # Test candump availability and basic functionality
+    bashio::log.info "[DEBUG] === CAN Tools Check ==="
+    if command -v candump >/dev/null 2>&1; then
+        bashio::log.info "[DEBUG] candump is available: $(which candump)"
+        bashio::log.info "[DEBUG] candump version: $(candump --version 2>&1 | head -n1 || echo 'version unknown')"
+    else
+        bashio::log.error "[DEBUG] candump command not found!"
+    fi
+
+    if command -v cansend >/dev/null 2>&1; then
+        bashio::log.info "[DEBUG] cansend is available: $(which cansend)"
+    else
+        bashio::log.error "[DEBUG] cansend command not found!"
+    fi
+
+    bashio::log.info "[DEBUG] ==============================================="
+fi
+
 bashio::log.info "✅ CAN interface $CAN_INTERFACE initialized successfully at ${CAN_BITRATE} bps"
 
 # ========================
@@ -208,17 +269,54 @@ fi
 # Start Bridge Processes
 # ========================
 
-# CAN -> MQTT Bridge (simplified persistent connection)
+# CAN -> MQTT Bridge (with comprehensive debug logging)
 bashio::log.info "Starting CAN->MQTT bridge..."
 {
+    FRAME_COUNT=0
     while true; do
-        candump -L "$CAN_INTERFACE" 2>/dev/null | awk '{print $3}' | \
-        while IFS= read -r frame; do
-            if [ -n "$frame" ]; then
-                echo "$frame"
-            fi
-        done | mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" $MQTT_AUTH_ARGS \
-                            -t "$MQTT_TOPIC_RAW" -q 1 -l
+        [ "$DEBUG_LOGGING" = "true" ] && bashio::log.info "[DEBUG] CAN->MQTT: Starting candump on $CAN_INTERFACE"
+        [ "$DEBUG_LOGGING" = "true" ] && bashio::log.info "[DEBUG] CAN->MQTT: Listening for CAN frames..."
+
+        # Capture both stdout and stderr from candump
+        if [ "$DEBUG_LOGGING" = "true" ]; then
+            # Debug mode: show all candump output and errors
+            candump -L "$CAN_INTERFACE" 2>&1 | while IFS= read -r line; do
+                # Check if this is an error message
+                if [[ "$line" =~ ^error ]] || [[ "$line" =~ ^Error ]] || [[ "$line" =~ ^WARNING ]]; then
+                    bashio::log.error "[DEBUG] CAN->MQTT candump error: $line"
+                else
+                    # Log raw candump output
+                    bashio::log.info "[DEBUG] CAN->MQTT candump raw: $line"
+
+                    # Extract frame (3rd field)
+                    frame=$(echo "$line" | awk '{print $3}')
+                    if [ -n "$frame" ]; then
+                        FRAME_COUNT=$((FRAME_COUNT + 1))
+                        bashio::log.info "[DEBUG] CAN->MQTT frame #$FRAME_COUNT: $frame"
+                        echo "$frame"
+                    fi
+                fi
+            done | mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" $MQTT_AUTH_ARGS \
+                                -t "$MQTT_TOPIC_RAW" -q 1 -l
+        else
+            # Normal mode: just process frames
+            candump -L "$CAN_INTERFACE" 2>&1 | while IFS= read -r line; do
+                # Still log errors even in normal mode
+                if [[ "$line" =~ ^error ]] || [[ "$line" =~ ^Error ]] || [[ "$line" =~ ^WARNING ]]; then
+                    bashio::log.error "CAN->MQTT candump error: $line"
+                else
+                    frame=$(echo "$line" | awk '{print $3}')
+                    if [ -n "$frame" ]; then
+                        echo "$frame"
+                    fi
+                fi
+            done | mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" $MQTT_AUTH_ARGS \
+                                -t "$MQTT_TOPIC_RAW" -q 1 -l
+        fi
+
+        EXIT_CODE=$?
+        [ "$DEBUG_LOGGING" = "true" ] && bashio::log.warning "[DEBUG] CAN->MQTT: candump exited with code $EXIT_CODE"
+        [ "$DEBUG_LOGGING" = "true" ] && bashio::log.warning "[DEBUG] CAN->MQTT: Total frames received before disconnect: $FRAME_COUNT"
 
         bashio::log.warning "CAN->MQTT bridge disconnected, reconnecting in 30 seconds..."
         sleep 30
@@ -363,6 +461,7 @@ bashio::log.info "Monitoring bridge processes. Press Ctrl+C or stop the add-on t
 # ========================
 # Process Monitoring
 # ========================
+MONITOR_ITERATION=0
 while true; do
     # Check if either process died
     if ! kill -0 "$CAN_TO_MQTT_PID" 2>/dev/null; then
@@ -379,6 +478,38 @@ while true; do
         exit 1
     fi
 
+    # Debug mode: Log CAN bus statistics every 30 seconds (3 iterations)
+    if [ "$DEBUG_LOGGING" = "true" ] && [ $((MONITOR_ITERATION % 3)) -eq 0 ]; then
+        if [ -d "/sys/class/net/$CAN_INTERFACE/statistics" ]; then
+            RX_PACKETS=$(cat /sys/class/net/$CAN_INTERFACE/statistics/rx_packets 2>/dev/null || echo '0')
+            TX_PACKETS=$(cat /sys/class/net/$CAN_INTERFACE/statistics/tx_packets 2>/dev/null || echo '0')
+            RX_ERRORS=$(cat /sys/class/net/$CAN_INTERFACE/statistics/rx_errors 2>/dev/null || echo '0')
+            TX_ERRORS=$(cat /sys/class/net/$CAN_INTERFACE/statistics/tx_errors 2>/dev/null || echo '0')
+            RX_DROPPED=$(cat /sys/class/net/$CAN_INTERFACE/statistics/rx_dropped 2>/dev/null || echo '0')
+            TX_DROPPED=$(cat /sys/class/net/$CAN_INTERFACE/statistics/tx_dropped 2>/dev/null || echo '0')
+
+            bashio::log.info "[DEBUG] === CAN Bus Statistics ==="
+            bashio::log.info "[DEBUG] RX: packets=$RX_PACKETS errors=$RX_ERRORS dropped=$RX_DROPPED"
+            bashio::log.info "[DEBUG] TX: packets=$TX_PACKETS errors=$TX_ERRORS dropped=$TX_DROPPED"
+
+            # Show interface state
+            OPERSTATE=$(cat /sys/class/net/$CAN_INTERFACE/operstate 2>/dev/null || echo 'unknown')
+            CARRIER=$(cat /sys/class/net/$CAN_INTERFACE/carrier 2>/dev/null || echo 'unknown')
+            bashio::log.info "[DEBUG] Interface state: $OPERSTATE, carrier: $CARRIER"
+
+            # If no packets received, provide troubleshooting hint
+            if [ "$RX_PACKETS" -eq 0 ] && [ $MONITOR_ITERATION -gt 0 ]; then
+                bashio::log.warning "[DEBUG] No CAN frames received yet. Possible causes:"
+                bashio::log.warning "[DEBUG]   - No devices transmitting on the CAN bus"
+                bashio::log.warning "[DEBUG]   - Wrong bitrate (currently: $CAN_BITRATE bps)"
+                bashio::log.warning "[DEBUG]   - Hardware connection issue"
+                bashio::log.warning "[DEBUG]   - CAN termination resistor missing/incorrect"
+            fi
+
+            bashio::log.info "[DEBUG] =========================="
+        fi
+    fi
+
     # Log process health every hour for basic monitoring
     if [ $(($(date +%s) % 3600)) -eq 0 ]; then
         bashio::log.info "Process monitor: CAN->MQTT (PID: $CAN_TO_MQTT_PID), MQTT->CAN (PID: $MQTT_TO_CAN_PID) - all healthy"
@@ -386,6 +517,8 @@ while true; do
 
     # Update health check status (local file only)
     update_health_check "OK"
+
+    MONITOR_ITERATION=$((MONITOR_ITERATION + 1))
 
     # Wait before next check
     sleep 10

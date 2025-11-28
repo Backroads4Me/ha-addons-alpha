@@ -16,7 +16,7 @@ BUNDLED_PROJECT="/opt/rv-link-project"
 # Add-on Slugs
 SLUG_MOSQUITTO="core_mosquitto"
 SLUG_NODERED="a0d7b954_nodered"
-SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
+SLUG_CAN_BRIDGE="bfbf1be2_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
@@ -351,7 +351,7 @@ get_managed_version() {
   jq -r '.version // ""' "$STATE_FILE"
 }
 
-# ======================== 
+# ========================
 # Phase 0: Deployment
 # ======================== 
 bashio::log.info "📋 Phase 0: Deploying Files"
