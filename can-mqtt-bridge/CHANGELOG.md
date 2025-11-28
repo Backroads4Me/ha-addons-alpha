@@ -1,3 +1,9 @@
+## [1.0.10] - 2025-11-28
+
+### Fixed
+
+- Configuration schema validation for optional expected_oscillator parameter
+
 ## [1.0.9] - 2025-11-28
 
 ### Added
