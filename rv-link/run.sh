@@ -16,7 +16,7 @@ BUNDLED_PROJECT="/opt/rv-link-project"
 # Add-on Slugs
 SLUG_MOSQUITTO="core_mosquitto"
 SLUG_NODERED="a0d7b954_nodered"
-SLUG_CAN_BRIDGE="bfbf1be2_can-mqtt-bridge"
+SLUG_CAN_BRIDGE="3b081c96_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
@@ -451,7 +451,7 @@ fi
 # Configure CAN-MQTT Bridge with our settings
 bashio::log.info "   ⚙️  Configuring CAN-MQTT Bridge..."
 
-# Use jq to safely construct the JSON, handling special characters in passwords
+# Use jq to construct the JSON, handling special characters in passwords
 CAN_BRIDGE_CONFIG=$(jq -n \
   --arg can_interface "$CAN_INTERFACE" \
   --arg can_bitrate "$CAN_BITRATE" \
@@ -557,12 +557,14 @@ fi
 
 # Configure Node-RED
 NR_INFO=$(api_call GET "/addons/$SLUG_NODERED/info")
-NR_OPTIONS=$(echo "$NR_INFO" | jq '.data.options')
+log_debug "NR_INFO response: $NR_INFO"
+NR_OPTIONS=$(echo "$NR_INFO" | jq '.data.options // {}')
+log_debug "NR_OPTIONS extracted: $NR_OPTIONS"
 SECRET=$(echo "$NR_OPTIONS" | jq -r '.credential_secret // empty')
 
 # Define the command that will run inside the Node-RED container on startup.
 # 1. Create project directories needed by the flow.
-# 2. Copy the essential 'rvc' directory into the project space.
+# 2. Copy the 'rvc' directory into the project space.
 # 3. Use jq to modify the source flows.json:
 #    - It finds the 'mqtt-broker' node.
 #    - It overwrites the broker and credentials to use environment variables.
@@ -583,7 +585,7 @@ MQTT_ENV_VARS=$(jq -n \
 ]')
 
 if [ -z "$SECRET" ]; then
-  bashio::log.info "   ⚠️  No credential_secret found. Generating one..."
+  bashio::log.info "   ✅  No credential_secret found. Generating one..."
   NEW_SECRET=$(openssl rand -hex 16)
   NEW_OPTIONS=$(echo "$NR_OPTIONS" | jq \
     --arg secret "$NEW_SECRET" \
