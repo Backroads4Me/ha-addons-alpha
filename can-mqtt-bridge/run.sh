@@ -18,7 +18,6 @@ mkdir -p /var/run/s6/healthcheck
 # ========================
 CAN_INTERFACE=$(bashio::config 'can_interface')
 CAN_BITRATE=$(bashio::config 'can_bitrate')
-EXPECTED_OSCILLATOR=$(bashio::config 'expected_oscillator')
 
 # Try to use service discovery for MQTT broker
 if bashio::services.available "mqtt"; then
@@ -161,129 +160,10 @@ if [ -f "/sys/class/net/$CAN_INTERFACE/operstate" ] && [ "$(cat "/sys/class/net/
     ip link set "$CAN_INTERFACE" down
 fi
 
-# ========================
-# Oscillator Frequency Detection & Compensation
-# ========================
-detect_and_compensate_oscillator() {
-    local requested_bitrate=$1
-    local interface=$2
-
-    bashio::log.info "Checking for oscillator frequency mismatch..."
-
-    # Get detailed interface information without changing state
-    local can_details
-    can_details=$(ip -details link show "$interface" 2>/dev/null)
-
-    if [ -z "$can_details" ]; then
-        bashio::log.warning "Could not retrieve interface details - skipping oscillator check"
-        echo "$requested_bitrate"
-        return 0
-    fi
-
-    # Extract clock frequency using BusyBox-compatible sed
-    local driver_clock
-    driver_clock=$(echo "$can_details" | sed -n 's/.*clock \([0-9]*\).*/\1/p' | head -n1)
-
-    if [ -z "$driver_clock" ] || [ "$driver_clock" -eq 0 ] 2>/dev/null; then
-        bashio::log.warning "Could not detect driver clock frequency - skipping oscillator check"
-        echo "$requested_bitrate"
-        return 0
-    fi
-
-    bashio::log.info "Detected driver clock: ${driver_clock} Hz"
-
-    # Determine expected oscillator frequency
-    local expected_oscillator
-
-    # Check if user manually configured expected oscillator
-    if [ -n "$EXPECTED_OSCILLATOR" ] && [ "$EXPECTED_OSCILLATOR" -gt 0 ] 2>/dev/null; then
-        expected_oscillator=$EXPECTED_OSCILLATOR
-        bashio::log.info "Using configured expected oscillator: ${expected_oscillator} Hz"
-    else
-        # Auto-infer expected oscillator based on driver clock
-        # Key insight: 8MHz driver reading is almost always the bug (should be 16MHz)
-
-        if [ "$driver_clock" -eq 16000000 ] || [ "$driver_clock" -eq 20000000 ]; then
-            # 16MHz or 20MHz driver reading - assume correct, no compensation needed
-            bashio::log.info "Driver clock ${driver_clock} Hz appears correct - no compensation needed"
-            echo "$requested_bitrate"
-            return 0
-        elif [ "$driver_clock" -eq 8000000 ]; then
-            # Ambiguous: could be correct 8MHz or the 16MHz bug
-            # Default to assuming it's the bug (most common) but inform user
-            expected_oscillator=16000000
-            bashio::log.info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            bashio::log.info "Driver reports 8 MHz clock - this is often a bug"
-            bashio::log.info "Assuming hardware is actually 16 MHz (most common)"
-            bashio::log.info "If your hardware truly has 8 MHz crystal, set:"
-            bashio::log.info "  expected_oscillator: 8000000"
-            bashio::log.info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        elif [ "$driver_clock" -eq 4000000 ]; then
-            # Less common: 8MHz hardware detected as 4MHz
-            expected_oscillator=8000000
-            bashio::log.info "Inferred expected oscillator: ${expected_oscillator} Hz"
-        else
-            # Unknown configuration - default to 16MHz (most common for Waveshare HATs)
-            expected_oscillator=16000000
-            bashio::log.warning "Unusual driver clock ${driver_clock} Hz - defaulting to 16MHz oscillator"
-            bashio::log.warning "If this doesn't work, set expected_oscillator manually in config"
-        fi
-    fi
-
-    # Calculate compensation factor
-    local compensation_factor
-    compensation_factor=$(awk "BEGIN {printf \"%.6f\", $expected_oscillator / $driver_clock}")
-
-    # Only compensate if factor is not approximately 1.0
-    if awk "BEGIN {exit !($compensation_factor >= 0.99 && $compensation_factor <= 1.01)}"; then
-        bashio::log.info "Compensation factor ${compensation_factor} is close to 1.0 - no compensation needed"
-        echo "$requested_bitrate"
-        return 0
-    fi
-
-    # Calculate compensated bitrate
-    local compensated_bitrate
-    compensated_bitrate=$(awk "BEGIN {printf \"%.0f\", $requested_bitrate / $compensation_factor}")
-
-    # Validate compensated bitrate is reasonable (between 10 kbps and 1 Mbps)
-    if [ "$compensated_bitrate" -lt 10000 ] || [ "$compensated_bitrate" -gt 1000000 ]; then
-        bashio::log.error "Calculated compensated bitrate ${compensated_bitrate} is out of valid range"
-        bashio::log.error "Driver clock: ${driver_clock} Hz, Expected: ${expected_oscillator} Hz"
-        bashio::log.error "Requested: ${requested_bitrate} bps, Factor: ${compensation_factor}"
-        bashio::log.error "Using requested bitrate without compensation - CAN bus may not work correctly!"
-        echo "$requested_bitrate"
-        return 1
-    fi
-
-    # Log the compensation
-    bashio::log.info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    bashio::log.info "Oscillator Frequency Mismatch Detected - Auto-Compensating"
-    bashio::log.info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    bashio::log.info "Expected oscillator frequency: ${expected_oscillator} Hz ($(awk "BEGIN {printf \"%.0f\", $expected_oscillator/1000000}") MHz)"
-    bashio::log.info "Driver configured frequency:   ${driver_clock} Hz ($(awk "BEGIN {printf \"%.0f\", $driver_clock/1000000}") MHz)"
-    bashio::log.info "Compensation factor:           ${compensation_factor}x"
-    bashio::log.info "Requested bitrate:             ${requested_bitrate} bps"
-    bashio::log.info "Compensated bitrate:           ${compensated_bitrate} bps"
-    bashio::log.info "Actual CAN bus speed:          ${requested_bitrate} bps (after compensation)"
-    bashio::log.info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-    # Return compensated bitrate
-    echo "$compensated_bitrate"
-    return 0
-}
-
-# Detect oscillator mismatch and calculate compensated bitrate if needed
-EFFECTIVE_BITRATE=$(detect_and_compensate_oscillator "$CAN_BITRATE" "$CAN_INTERFACE")
-
-# Set up CAN interface with effective bitrate (may be compensated)
-if [ "$EFFECTIVE_BITRATE" != "$CAN_BITRATE" ]; then
-    bashio::log.info "Setting up CAN interface with compensated bitrate $EFFECTIVE_BITRATE (target: $CAN_BITRATE)"
-else
-    bashio::log.info "Setting up CAN interface with bitrate $CAN_BITRATE"
-fi
-
-if ! ip link set "$CAN_INTERFACE" up type can bitrate "$EFFECTIVE_BITRATE"; then
-    bashio::log.fatal "Failed to set CAN interface up with bitrate $EFFECTIVE_BITRATE"
+# Set up CAN interface with bitrate (exact copy from working add-on)
+bashio::log.info "Setting up CAN interface with bitrate $CAN_BITRATE"
+if ! ip link set "$CAN_INTERFACE" up type can bitrate "$CAN_BITRATE"; then
+    bashio::log.fatal "Failed to set CAN interface up with bitrate $CAN_BITRATE"
     bashio::log.fatal "Please ensure CAN hardware is connected and recognized"
     exit 1
 fi
@@ -297,95 +177,6 @@ fi
 # Print final status for debugging
 bashio::log.info "Final interface status:"
 ip link show "$CAN_INTERFACE"
-
-# Debug mode: Show detailed interface diagnostics
-if [ "$DEBUG_LOGGING" = "true" ]; then
-    bashio::log.info "[DEBUG] ========== CAN Interface Diagnostics =========="
-
-    # Show detailed interface information
-    if [ -d "/sys/class/net/$CAN_INTERFACE" ]; then
-        bashio::log.info "[DEBUG] Interface operstate: $(cat /sys/class/net/$CAN_INTERFACE/operstate 2>/dev/null || echo 'unknown')"
-        bashio::log.info "[DEBUG] Interface carrier: $(cat /sys/class/net/$CAN_INTERFACE/carrier 2>/dev/null || echo 'unknown')"
-
-        # Show CAN statistics if available
-        if [ -d "/sys/class/net/$CAN_INTERFACE/statistics" ]; then
-            bashio::log.info "[DEBUG] RX packets: $(cat /sys/class/net/$CAN_INTERFACE/statistics/rx_packets 2>/dev/null || echo '0')"
-            bashio::log.info "[DEBUG] TX packets: $(cat /sys/class/net/$CAN_INTERFACE/statistics/tx_packets 2>/dev/null || echo '0')"
-            bashio::log.info "[DEBUG] RX errors: $(cat /sys/class/net/$CAN_INTERFACE/statistics/rx_errors 2>/dev/null || echo '0')"
-            bashio::log.info "[DEBUG] TX errors: $(cat /sys/class/net/$CAN_INTERFACE/statistics/tx_errors 2>/dev/null || echo '0')"
-        fi
-    fi
-
-    # Show CAN-specific settings and timing parameters
-    bashio::log.info "[DEBUG] === CAN Interface Settings ==="
-    bashio::log.info "[DEBUG] Configured bitrate: $CAN_BITRATE bps"
-
-    # Extract and display CAN timing parameters from ip -details output
-    CAN_DETAILS=$(ip -details link show "$CAN_INTERFACE" 2>/dev/null)
-    if [ -n "$CAN_DETAILS" ]; then
-        bashio::log.info "[DEBUG] Full interface details:"
-        echo "$CAN_DETAILS" | while IFS= read -r line; do
-            bashio::log.info "[DEBUG]   $line"
-        done
-
-        # Try to extract specific CAN parameters (using BusyBox-compatible commands)
-        ACTUAL_BITRATE=$(echo "$CAN_DETAILS" | sed -n 's/.*bitrate \([0-9]*\).*/\1/p' | head -n1)
-        [ -z "$ACTUAL_BITRATE" ] && ACTUAL_BITRATE="unknown"
-
-        SAMPLE_POINT=$(echo "$CAN_DETAILS" | sed -n 's/.*sample-point \([0-9.]*\).*/\1/p' | head -n1)
-        [ -z "$SAMPLE_POINT" ] && SAMPLE_POINT="unknown"
-
-        TQ=$(echo "$CAN_DETAILS" | sed -n 's/.*tq \([0-9]*\).*/\1/p' | head -n1)
-        [ -z "$TQ" ] && TQ="unknown"
-
-        bashio::log.info "[DEBUG] === Extracted CAN Parameters ==="
-        bashio::log.info "[DEBUG] Actual bitrate: $ACTUAL_BITRATE bps"
-        bashio::log.info "[DEBUG] Sample point: $SAMPLE_POINT"
-        bashio::log.info "[DEBUG] Time quantum (tq): $TQ ns"
-    else
-        bashio::log.warning "[DEBUG] Could not retrieve detailed CAN settings"
-    fi
-
-    # Test candump availability and basic functionality
-    bashio::log.info "[DEBUG] === CAN Tools Check ==="
-    if command -v candump >/dev/null 2>&1; then
-        bashio::log.info "[DEBUG] candump is available: $(which candump)"
-    else
-        bashio::log.error "[DEBUG] candump command not found!"
-    fi
-
-    if command -v cansend >/dev/null 2>&1; then
-        bashio::log.info "[DEBUG] cansend is available: $(which cansend)"
-    else
-        bashio::log.error "[DEBUG] cansend command not found!"
-    fi
-
-    if command -v ip >/dev/null 2>&1; then
-        bashio::log.info "[DEBUG] ip (iproute2) is available: $(which ip)"
-    else
-        bashio::log.error "[DEBUG] ip command not found!"
-    fi
-
-    # Show compensation details in debug mode
-    if [ "$EFFECTIVE_BITRATE" != "$CAN_BITRATE" ]; then
-        bashio::log.info "[DEBUG] === Oscillator Compensation Active ==="
-        bashio::log.info "[DEBUG] User requested bitrate: $CAN_BITRATE bps"
-        bashio::log.info "[DEBUG] Compensated bitrate:    $EFFECTIVE_BITRATE bps"
-        bashio::log.info "[DEBUG] Expected CAN bus speed: $CAN_BITRATE bps (after hardware compensation)"
-
-        # Verify actual bitrate from interface
-        if [ "$ACTUAL_BITRATE" = "$EFFECTIVE_BITRATE" ]; then
-            bashio::log.info "[DEBUG] ✓ Verification: Interface set to compensated bitrate ($EFFECTIVE_BITRATE bps)"
-            bashio::log.info "[DEBUG] ✓ Hardware will multiply by $(awk "BEGIN {printf \"%.1f\", $CAN_BITRATE / $EFFECTIVE_BITRATE}")x → actual $CAN_BITRATE bps on CAN bus"
-            bashio::log.info "[DEBUG] ✓ If CAN frames are received, compensation is working correctly!"
-        else
-            bashio::log.warning "[DEBUG] ⚠ Verification: Interface bitrate mismatch"
-            bashio::log.warning "[DEBUG]   Requested: $EFFECTIVE_BITRATE, Got: $ACTUAL_BITRATE"
-        fi
-    fi
-
-    bashio::log.info "[DEBUG] ==============================================="
-fi
 
 bashio::log.info "✅ CAN interface $CAN_INTERFACE initialized successfully at ${CAN_BITRATE} bps"
 
@@ -417,54 +208,17 @@ fi
 # Start Bridge Processes
 # ========================
 
-# CAN -> MQTT Bridge (with comprehensive debug logging)
+# CAN -> MQTT Bridge (simplified persistent connection)
 bashio::log.info "Starting CAN->MQTT bridge..."
 {
-    FRAME_COUNT=0
     while true; do
-        [ "$DEBUG_LOGGING" = "true" ] && bashio::log.info "[DEBUG] CAN->MQTT: Starting candump on $CAN_INTERFACE"
-        [ "$DEBUG_LOGGING" = "true" ] && bashio::log.info "[DEBUG] CAN->MQTT: Listening for CAN frames..."
-
-        # Capture both stdout and stderr from candump
-        if [ "$DEBUG_LOGGING" = "true" ]; then
-            # Debug mode: show all candump output and errors
-            candump -L "$CAN_INTERFACE" 2>&1 | while IFS= read -r line; do
-                # Check if this is an error message
-                if [[ "$line" =~ ^error ]] || [[ "$line" =~ ^Error ]] || [[ "$line" =~ ^WARNING ]]; then
-                    bashio::log.error "[DEBUG] CAN->MQTT candump error: $line"
-                else
-                    # Log raw candump output
-                    bashio::log.info "[DEBUG] CAN->MQTT candump raw: $line"
-
-                    # Extract frame (3rd field)
-                    frame=$(echo "$line" | awk '{print $3}')
-                    if [ -n "$frame" ]; then
-                        FRAME_COUNT=$((FRAME_COUNT + 1))
-                        bashio::log.info "[DEBUG] CAN->MQTT frame #$FRAME_COUNT: $frame"
-                        echo "$frame"
-                    fi
-                fi
-            done | mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" $MQTT_AUTH_ARGS \
-                                -t "$MQTT_TOPIC_RAW" -q 1 -l
-        else
-            # Normal mode: just process frames
-            candump -L "$CAN_INTERFACE" 2>&1 | while IFS= read -r line; do
-                # Still log errors even in normal mode
-                if [[ "$line" =~ ^error ]] || [[ "$line" =~ ^Error ]] || [[ "$line" =~ ^WARNING ]]; then
-                    bashio::log.error "CAN->MQTT candump error: $line"
-                else
-                    frame=$(echo "$line" | awk '{print $3}')
-                    if [ -n "$frame" ]; then
-                        echo "$frame"
-                    fi
-                fi
-            done | mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" $MQTT_AUTH_ARGS \
-                                -t "$MQTT_TOPIC_RAW" -q 1 -l
-        fi
-
-        EXIT_CODE=$?
-        [ "$DEBUG_LOGGING" = "true" ] && bashio::log.warning "[DEBUG] CAN->MQTT: candump exited with code $EXIT_CODE"
-        [ "$DEBUG_LOGGING" = "true" ] && bashio::log.warning "[DEBUG] CAN->MQTT: Total frames received before disconnect: $FRAME_COUNT"
+        candump -L "$CAN_INTERFACE" 2>/dev/null | awk '{print $3}' | \
+        while IFS= read -r frame; do
+            if [ -n "$frame" ]; then
+                echo "$frame"
+            fi
+        done | mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" $MQTT_AUTH_ARGS \
+                            -t "$MQTT_TOPIC_RAW" -q 1 -l
 
         bashio::log.warning "CAN->MQTT bridge disconnected, reconnecting in 30 seconds..."
         sleep 30
@@ -609,7 +363,6 @@ bashio::log.info "Monitoring bridge processes. Press Ctrl+C or stop the add-on t
 # ========================
 # Process Monitoring
 # ========================
-MONITOR_ITERATION=0
 while true; do
     # Check if either process died
     if ! kill -0 "$CAN_TO_MQTT_PID" 2>/dev/null; then
@@ -626,38 +379,6 @@ while true; do
         exit 1
     fi
 
-    # Debug mode: Log CAN bus statistics every 30 seconds (3 iterations)
-    if [ "$DEBUG_LOGGING" = "true" ] && [ $((MONITOR_ITERATION % 3)) -eq 0 ]; then
-        if [ -d "/sys/class/net/$CAN_INTERFACE/statistics" ]; then
-            RX_PACKETS=$(cat /sys/class/net/$CAN_INTERFACE/statistics/rx_packets 2>/dev/null || echo '0')
-            TX_PACKETS=$(cat /sys/class/net/$CAN_INTERFACE/statistics/tx_packets 2>/dev/null || echo '0')
-            RX_ERRORS=$(cat /sys/class/net/$CAN_INTERFACE/statistics/rx_errors 2>/dev/null || echo '0')
-            TX_ERRORS=$(cat /sys/class/net/$CAN_INTERFACE/statistics/tx_errors 2>/dev/null || echo '0')
-            RX_DROPPED=$(cat /sys/class/net/$CAN_INTERFACE/statistics/rx_dropped 2>/dev/null || echo '0')
-            TX_DROPPED=$(cat /sys/class/net/$CAN_INTERFACE/statistics/tx_dropped 2>/dev/null || echo '0')
-
-            bashio::log.info "[DEBUG] === CAN Bus Statistics ==="
-            bashio::log.info "[DEBUG] RX: packets=$RX_PACKETS errors=$RX_ERRORS dropped=$RX_DROPPED"
-            bashio::log.info "[DEBUG] TX: packets=$TX_PACKETS errors=$TX_ERRORS dropped=$TX_DROPPED"
-
-            # Show interface state
-            OPERSTATE=$(cat /sys/class/net/$CAN_INTERFACE/operstate 2>/dev/null || echo 'unknown')
-            CARRIER=$(cat /sys/class/net/$CAN_INTERFACE/carrier 2>/dev/null || echo 'unknown')
-            bashio::log.info "[DEBUG] Interface state: $OPERSTATE, carrier: $CARRIER"
-
-            # If no packets received, provide troubleshooting hint
-            if [ "$RX_PACKETS" -eq 0 ] && [ $MONITOR_ITERATION -gt 0 ]; then
-                bashio::log.warning "[DEBUG] No CAN frames received yet. Possible causes:"
-                bashio::log.warning "[DEBUG]   - No devices transmitting on the CAN bus"
-                bashio::log.warning "[DEBUG]   - Wrong bitrate (currently: $CAN_BITRATE bps)"
-                bashio::log.warning "[DEBUG]   - Hardware connection issue"
-                bashio::log.warning "[DEBUG]   - CAN termination resistor missing/incorrect"
-            fi
-
-            bashio::log.info "[DEBUG] =========================="
-        fi
-    fi
-
     # Log process health every hour for basic monitoring
     if [ $(($(date +%s) % 3600)) -eq 0 ]; then
         bashio::log.info "Process monitor: CAN->MQTT (PID: $CAN_TO_MQTT_PID), MQTT->CAN (PID: $MQTT_TO_CAN_PID) - all healthy"
@@ -665,8 +386,6 @@ while true; do
 
     # Update health check status (local file only)
     update_health_check "OK"
-
-    MONITOR_ITERATION=$((MONITOR_ITERATION + 1))
 
     # Wait before next check
     sleep 10

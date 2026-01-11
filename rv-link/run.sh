@@ -22,6 +22,9 @@ SLUG_CAN_BRIDGE="3b081c96_can-mqtt-bridge"
 STATE_FILE="/data/.rvlink-state.json"
 ADDON_VERSION=$(bashio::addon.version)
 
+# Track component status for summary
+BRIDGE_STATUS="not_started"
+
 # Bridge Config (to pass to CAN bridge addon)
 CAN_INTERFACE=$(bashio::config 'can_interface')
 CAN_BITRATE=$(bashio::config 'can_bitrate')
@@ -56,6 +59,58 @@ api_call() {
   fi
 
   echo "$response"
+}
+
+get_addon_logs() {
+  local slug=$1
+  local lines=${2:-50}  # Default to last 50 lines
+  api_call GET "/addons/$slug/logs" | jq -r '.data // ""' | tail -n "$lines"
+}
+
+check_mqtt_integration() {
+  bashio::log.info "🔍 Checking for MQTT integration..."
+
+  # Call Home Assistant Core API to get list of loaded components
+  local response
+  response=$(curl -s -H "Authorization: Bearer $SUPERVISOR_TOKEN" \
+    "http://supervisor/core/api/components" 2>/dev/null)
+
+  if [ -z "$response" ]; then
+    bashio::log.warning "   ⚠️  Unable to query Home Assistant Core API"
+    return 1
+  fi
+
+  # Check if 'mqtt' is in the components array
+  if echo "$response" | jq -r '.[] | select(. == "mqtt")' | grep -q "mqtt"; then
+    bashio::log.info "   ✅ MQTT integration is configured"
+    return 0
+  else
+    return 1
+  fi
+}
+
+send_notification() {
+  local title=$1
+  local message=$2
+  local notification_id=${3:-"rvlink_notification"}
+
+  # Call Home Assistant Core API to create a persistent notification
+  local payload
+  payload=$(jq -n \
+    --arg title "$title" \
+    --arg message "$message" \
+    --arg id "$notification_id" \
+    '{
+      "title": $title,
+      "message": $message,
+      "notification_id": $id
+    }')
+
+  curl -s -X POST \
+    -H "Authorization: Bearer $SUPERVISOR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    "http://supervisor/core/api/services/persistent_notification/create" >/dev/null 2>&1
 }
 
 is_installed() {
@@ -419,6 +474,7 @@ fi
 
 api_call POST "/addons/$SLUG_MOSQUITTO/options" "{\"options\": $NEW_MOSQUITTO_OPTIONS}" > /dev/null
 bashio::log.info "   ✅ Configured Mosquitto user: $MQTT_USER"
+bashio::log.info "   ℹ️  Created MQTT user: $MQTT_USER (password: ${#MQTT_PASS} chars)"
 
 # Restart Mosquitto to apply new user
 if is_running "$SLUG_MOSQUITTO"; then
@@ -431,7 +487,73 @@ wait_for_mqtt "$MQTT_HOST" "$MQTT_PORT" "$MQTT_USER" "$MQTT_PASS" || {
     exit 1
 }
 
-# ======================== 
+# Restart Mosquitto again to trigger MQTT integration discovery in Home Assistant
+bashio::log.info "   🔄 Restarting Mosquitto to trigger MQTT integration discovery..."
+restart_addon "$SLUG_MOSQUITTO" || exit 1
+bashio::log.info "   ✅ Mosquitto restarted - MQTT integration should appear as discovered"
+
+# Give Home Assistant a moment to detect the service
+sleep 3
+
+# ========================
+# Phase 1.5: MQTT Integration Check
+# ========================
+bashio::log.info "📋 Phase 1.5: Validating MQTT Integration"
+
+if ! check_mqtt_integration; then
+  # Send persistent notification to Home Assistant UI
+  send_notification \
+    "⚠️ RV Link Setup: MQTT Integration Required" \
+    "**RV Link installation is paused!**
+
+✅ Mosquitto broker is installed and running
+⚠️ But MQTT integration needs to be configured
+
+**Quick Setup (30 seconds):**
+
+1. Go to **Settings → Devices & Services**
+2. Look for **MQTT** in the 'Discovered' section
+3. Click **CONFIGURE** on the MQTT card
+4. Click **SUBMIT** to use Mosquitto broker
+5. ✅ **Enable discovery** when prompted
+6. Return to **Settings → Add-ons → RV Link** and click **RESTART**
+
+**Why?** The MQTT integration listens for device discovery messages and creates entities automatically.
+
+_See RV Link addon logs for more details_" \
+    "rvlink_mqtt_setup"
+
+  # Also log to addon logs for those who check
+  bashio::log.error ""
+  bashio::log.error "╔════════════════════════════════════════════════════════════╗"
+  bashio::log.error "║   ⚠️  MQTT INTEGRATION SETUP REQUIRED  ⚠️                  ║"
+  bashio::log.error "╚════════════════════════════════════════════════════════════╝"
+  bashio::log.error ""
+  bashio::log.error "   ✅ Mosquitto broker is installed and running"
+  bashio::log.error "   ⚠️  But MQTT integration needs to be configured"
+  bashio::log.error ""
+  bashio::log.error "   📋 Quick Setup (takes 30 seconds):"
+  bashio::log.error ""
+  bashio::log.error "   1. Check the notification in Home Assistant UI (🔔 bell icon)"
+  bashio::log.error "   2. Follow the instructions in the notification"
+  bashio::log.error "   3. Restart RV Link when done"
+  bashio::log.error ""
+  bashio::log.fatal "   ⏸️  Installation paused. Check HA notifications for setup instructions."
+  bashio::log.fatal ""
+  exit 1
+fi
+
+# If we get here, MQTT is configured - dismiss any previous notifications
+curl -s -X POST \
+  -H "Authorization: Bearer $SUPERVISOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"notification_id": "rvlink_mqtt_setup"}' \
+  "http://supervisor/core/api/services/persistent_notification/dismiss" >/dev/null 2>&1
+
+bashio::log.info "   ✅ MQTT integration is configured"
+bashio::log.info ""
+
+# ========================
 # Phase 2: CAN-MQTT Bridge
 # ======================== 
 bashio::log.info "📋 Phase 2: Installing CAN-MQTT Bridge"
@@ -450,6 +572,11 @@ fi
 
 # Configure CAN-MQTT Bridge with our settings
 bashio::log.info "   ⚙️  Configuring CAN-MQTT Bridge..."
+bashio::log.info "   > MQTT Configuration:"
+bashio::log.info "     - Host: $MQTT_HOST"
+bashio::log.info "     - Port: $MQTT_PORT"
+bashio::log.info "     - User: $MQTT_USER"
+bashio::log.info "     - Password: [${#MQTT_PASS} characters]"
 
 # Use jq to construct the JSON, handling special characters in passwords
 CAN_BRIDGE_CONFIG=$(jq -n \
@@ -489,14 +616,31 @@ fi
 # Set CAN-MQTT Bridge to start on boot
 set_boot_auto "$SLUG_CAN_BRIDGE"
 
-# Start CAN-MQTT Bridge
+# Start CAN-MQTT Bridge and verify it stays running
 bashio::log.info "   ▶️  Starting CAN-MQTT Bridge..."
-result=$(api_call POST "/addons/$SLUG_CAN_BRIDGE/start")
-if echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
-    bashio::log.info "   ✅ CAN-MQTT Bridge started"
-else
+result=$(api_call POST "/addons/$SLUG_CAN_BRIDGE/start" "")
+if ! echo "$result" | jq -e '.result == "ok"' >/dev/null 2>&1; then
     bashio::log.warning "   ⚠️  Failed to start CAN-MQTT Bridge: $(echo "$result" | jq -r '.message')"
-    bashio::log.warning "   Note: Bridge will fail if CAN hardware is not connected, but system orchestration succeeded."
+    BRIDGE_STATUS="failed_to_start"
+else
+    # Wait a few seconds for bridge to initialize and potentially fail
+    sleep 5
+
+    # Check if bridge is actually running
+    if is_running "$SLUG_CAN_BRIDGE"; then
+        bashio::log.info "   ✅ CAN-MQTT Bridge started successfully"
+        BRIDGE_STATUS="running"
+    else
+        # Bridge started but then stopped - fetch logs to show why
+        bashio::log.warning "   ⚠️  CAN-MQTT Bridge started but then stopped"
+        bashio::log.warning "   📋 Bridge error logs:"
+        bridge_logs=$(get_addon_logs "$SLUG_CAN_BRIDGE" 20)
+        # Extract and display FATAL or error lines
+        echo "$bridge_logs" | grep -E "(FATAL|ERROR|❌)" | while IFS= read -r line; do
+            bashio::log.warning "      $line"
+        done
+        BRIDGE_STATUS="stopped_after_start"
+    fi
 fi
 
 # ======================== 
@@ -662,22 +806,51 @@ set_boot_auto "$SLUG_NODERED" || bashio::log.warning "   ⚠️  Could not set N
 # Mark/update Node-RED as managed by RV Link (updates version on upgrades)
 mark_nodered_managed
 
-# ======================== 
-# Final Status
-# ======================== 
+# ========================
+# Installation Summary
+# ========================
+echo ""
+bashio::log.info "╔════════════════════════════════════════════════════════════╗"
+bashio::log.info "║          RV Link Installation Summary                      ║"
+bashio::log.info "╔════════════════════════════════════════════════════════════╗"
 bashio::log.info ""
-bashio::log.info "================================================"
-bashio::log.info "🚐 RV Link System Fully Operational"
-bashio::log.info "================================================"
+bashio::log.info "  MQTT Integration ................ ✅ Configured"
+bashio::log.info "  Mosquitto MQTT Broker ........... ✅ Running"
+if [ "$BRIDGE_STATUS" = "running" ]; then
+    bashio::log.info "  CAN-MQTT Bridge ................. ✅ Running"
+elif [ "$BRIDGE_STATUS" = "stopped_after_start" ]; then
+    bashio::log.warning "  CAN-MQTT Bridge ................. ⚠️  FAILED"
+    bashio::log.warning "    └─ Bridge stopped after startup (MQTT auth failure likely)"
+    bashio::log.warning "    └─ Check MQTT credentials in RV Link configuration"
+    bashio::log.warning "    └─ View full error: Settings → Add-ons → CAN-MQTT Bridge → Logs"
+elif [ "$BRIDGE_STATUS" = "failed_to_start" ]; then
+    bashio::log.warning "  CAN-MQTT Bridge ................. ⚠️  FAILED TO START"
+    bashio::log.warning "    └─ Check if CAN hardware is connected"
+else
+    bashio::log.warning "  CAN-MQTT Bridge ................. ⚠️  UNKNOWN STATUS"
+fi
+bashio::log.info "  Node-RED ........................ ✅ Configured"
 bashio::log.info ""
-bashio::log.info "   Components installed:"
-bashio::log.info "   ✅ Mosquitto MQTT Broker"
-bashio::log.info "   ✅ CAN-MQTT Bridge"
-bashio::log.info "   ✅ Node-RED Automation"
+if [ "$BRIDGE_STATUS" = "running" ]; then
+    bashio::log.info "  🎉 All components installed successfully!"
+else
+    bashio::log.warning "  ⚠️  Installation completed with warnings - see above"
+fi
+bashio::log.info ""
+bashio::log.info "╚════════════════════════════════════════════════════════════╝"
 bashio::log.info ""
 bashio::log.info "🚐 See the Overview Dashboard for new RV Link entities"
 bashio::log.info "🚐 Visit https://rvlink.app for more information"
 bashio::log.info ""
-bashio::log.info "   ℹ️  RV Link setup complete. The addon will now exit."
+bashio::log.info "   ✅ RV Link setup complete and running."
 bashio::log.info "   You only need to restart this addon when updating RV Link."
 bashio::log.info ""
+
+# Trap termination signals for graceful shutdown
+# This allows Home Assistant to stop/update the addon cleanly
+trap 'bashio::log.info "Shutting down RV Link..."; exit 0' SIGTERM SIGINT SIGQUIT
+
+# Keep the addon running so the logo stays colored
+# This prevents the greyed-out appearance in the Home Assistant UI
+bashio::log.info "   Monitoring mode - addon will continue running..."
+sleep infinity

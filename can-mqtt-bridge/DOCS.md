@@ -33,12 +33,11 @@ Before using this addon, ensure you have:
 
 The add-on has minimal configuration options:
 
-| Option                | Default          | Description                                                                                                        |
-| --------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `can_interface`       | `can0`           | CAN interface name                                                                                                 |
-| `can_bitrate`         | `250000`         | CAN bitrate (125000, 250000, 500000, or 1000000)                                                                   |
-| `expected_oscillator` | _(auto-detect)_  | Expected oscillator frequency in Hz (optional: 8000000, 16000000, 20000000). Leave empty for auto-detection       |
-| `mqtt_host`           | `core-mosquitto` | MQTT broker hostname (uses service discovery)                                                                      |
+| Option              | Default          | Description                                                                                                        |
+| ------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `can_interface`     | `can0`           | CAN interface name                                                                                                 |
+| `can_bitrate`       | `250000`         | CAN bitrate (125000, 250000, 500000, or 1000000)                                                                   |
+| `mqtt_host`         | `core-mosquitto` | MQTT broker hostname (uses service discovery)                                                                      |
 | `mqtt_port`         | `1883`           | MQTT broker port                                                                                                   |
 | `mqtt_user`         | `canbus`         | MQTT broker username _(auto-configured via service discovery when using Mosquitto add-on, otherwise set manually)_ |
 | `mqtt_pass`         | ``               | MQTT broker password _(auto-configured via service discovery when using Mosquitto add-on, otherwise set manually)_ |
@@ -152,65 +151,6 @@ Published to `can/status` topic:
 - Check CAN bus termination and wiring
 - Use debug logging to see frame conversion and transmission attempts
 - Test with known-good CAN frames first
-
-**Oscillator frequency mismatch (no CAN frames received):**
-
-The addon automatically detects and compensates for oscillator frequency mismatches in MCP251x CAN controllers. This occurs when the device tree overlay specifies one frequency (e.g., 16 MHz) but the driver defaults to another (e.g., 8 MHz), causing the actual CAN bus speed to be incorrect.
-
-**Symptoms:**
-- Cannot communicate with known-good CAN devices
-- RX packet counter stays at 0 even though other devices are transmitting
-- Interface shows up correctly but no frames received
-
-**Auto-compensation:**
-- The addon detects the driver's configured clock frequency
-- Compares against common oscillator frequencies (8 MHz, 16 MHz, 20 MHz)
-- Automatically adjusts the requested bitrate to achieve correct actual speed
-- Logs compensation details during startup
-
-**What you'll see in logs when compensation is active:**
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Oscillator Frequency Mismatch Detected - Auto-Compensating
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Expected oscillator frequency: 16000000 Hz (16 MHz)
-Driver configured frequency:   8000000 Hz (8 MHz)
-Compensation factor:           2.0x
-Requested bitrate:             250000 bps
-Compensated bitrate:           125000 bps
-Actual CAN bus speed:          250000 bps (after compensation)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-**Manual override:**
-
-The addon assumes 8 MHz driver reading is the bug (16 MHz hardware). If you have genuine 8 MHz hardware, or if auto-detection is incorrect, manually specify:
-
-```yaml
-expected_oscillator: 8000000   # For genuine 8 MHz crystal (disables compensation)
-# OR
-expected_oscillator: 16000000  # For 16 MHz crystal (forces compensation)
-```
-
-Common values:
-- `8000000` for genuine 8 MHz hardware (rare)
-- `16000000` for 16 MHz (most common for Waveshare CAN HAT +)
-- `20000000` for 20 MHz (some newer modules)
-
-**How to know which is correct:**
-- **If frames are received** after startup → compensation is working correctly
-- **If no frames received** and you know other devices are transmitting:
-  1. Try setting `expected_oscillator: 8000000` (disables compensation)
-  2. Restart addon
-  3. If frames now appear → your hardware truly has 8 MHz crystal
-
-**To fix permanently:**
-
-Add or verify in `/boot/config.txt` (or `/boot/firmware/config.txt`):
-```
-dtoverlay=mcp2515-can0,oscillator=16000000,interrupt=25
-```
-Then reboot your system.
 
 Enable `debug_logging: true` for verbose output.
 
