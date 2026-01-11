@@ -16,9 +16,9 @@ BUNDLED_PROJECT="/opt/rv-link-project"
 # Add-on Slugs
 SLUG_MOSQUITTO="core_mosquitto"
 SLUG_NODERED="a0d7b954_nodered"
-#SLUG_CAN_BRIDGE="3b081c96_can-mqtt-bridge"
-#Alpha version
-SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
+SLUG_CAN_BRIDGE="3b081c96_can-mqtt-bridge"
+#Alpha version for testing
+#SLUG_CAN_BRIDGE="837b0638_can-mqtt-bridge"
 
 # State file to track RV Link management
 STATE_FILE="/data/.rvlink-state.json"
