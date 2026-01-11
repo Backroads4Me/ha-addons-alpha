@@ -490,10 +490,12 @@ wait_for_mqtt "$MQTT_HOST" "$MQTT_PORT" "$MQTT_USER" "$MQTT_PASS" || {
 # Restart Mosquitto again to trigger MQTT integration discovery in Home Assistant
 bashio::log.info "   🔄 Restarting Mosquitto to trigger MQTT integration discovery..."
 restart_addon "$SLUG_MOSQUITTO" || exit 1
-bashio::log.info "   ✅ Mosquitto restarted - MQTT integration should appear as discovered"
+bashio::log.info "   ✅ Mosquitto restarted - waiting for service discovery to update..."
 
-# Give Home Assistant a moment to detect the service
-sleep 3
+# Give Mosquitto time to fully restart and publish updated service discovery
+# This ensures the CAN bridge gets the correct credentials when it starts
+sleep 10
+bashio::log.info "   ✅ Service discovery should now have updated credentials"
 
 # ========================
 # Phase 1.5: MQTT Integration Check

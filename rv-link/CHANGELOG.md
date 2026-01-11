@@ -1,3 +1,10 @@
+## [0.8.54] - 2026-01-11
+
+### Fixed
+
+- Increased delay after Mosquitto restart to allow service discovery credentials to fully update
+- CAN-MQTT Bridge now receives correct credentials on first start without manual Mosquitto restart
+
 ## [0.8.53] - 2026-01-11
 
 ### Changed
