@@ -503,7 +503,7 @@ bashio::log.info "📋 Phase 1.5: Validating MQTT Integration"
 if ! check_mqtt_integration; then
   # Send persistent notification to Home Assistant UI
   send_notification \
-    "⚠️ RV Link Setup: MQTT Integration Required" \
+    "⚠️ RV Link: MQTT Integration Required" \
     "**RV Link installation is paused!**
 
 ✅ Mosquitto broker is installed and running
@@ -513,10 +513,9 @@ if ! check_mqtt_integration; then
 
 1. Go to **Settings → Devices & Services**
 2. Look for **MQTT** in the 'Discovered' section
-3. Click **CONFIGURE** on the MQTT card
+3. Click **ADD** on the MQTT card
 4. Click **SUBMIT** to use Mosquitto broker
-5. ✅ **Enable discovery** when prompted
-6. Return to **Settings → Add-ons → RV Link** and click **RESTART**
+5. Return to **Settings → Add-ons → RV Link** and click **START**
 
 **Why?** The MQTT integration listens for device discovery messages and creates entities automatically.
 
@@ -526,7 +525,7 @@ _See RV Link addon logs for more details_" \
   # Also log to addon logs for those who check
   bashio::log.error ""
   bashio::log.error "╔════════════════════════════════════════════════════════════╗"
-  bashio::log.error "║   ⚠️  MQTT INTEGRATION SETUP REQUIRED  ⚠️                  ║"
+  bashio::log.error "║   ⚠️  MQTT INTEGRATION REQUIRED  ⚠️                        ║"
   bashio::log.error "╚════════════════════════════════════════════════════════════╝"
   bashio::log.error ""
   bashio::log.error "   ✅ Mosquitto broker is installed and running"
@@ -534,11 +533,15 @@ _See RV Link addon logs for more details_" \
   bashio::log.error ""
   bashio::log.error "   📋 Quick Setup (takes 30 seconds):"
   bashio::log.error ""
-  bashio::log.error "   1. Check the notification in Home Assistant UI (🔔 bell icon)"
-  bashio::log.error "   2. Follow the instructions in the notification"
-  bashio::log.error "   3. Restart RV Link when done"
+  bashio::log.error "   1. Go to Settings → Devices & Services"
+  bashio::log.error "   2. Look for MQTT in the 'Discovered' section"
+  bashio::log.error "   3. Click ADD on the MQTT card"
+  bashio::log.error "   4. Click SUBMIT to use Mosquitto broker"
+  bashio::log.error "   5. Return to Settings → Add-ons → RV Link and click START"
   bashio::log.error ""
-  bashio::log.fatal "   ⏸️  Installation paused. Check HA notifications for setup instructions."
+  bashio::log.error "   💡 Check the notification in Home Assistant UI (🔔 bell icon)"
+  bashio::log.error ""
+  bashio::log.fatal "   ⏸️  Installation paused. Complete MQTT setup and start RV Link."
   bashio::log.fatal ""
   exit 1
 fi
