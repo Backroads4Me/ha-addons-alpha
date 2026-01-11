@@ -1,3 +1,11 @@
+## [0.8.53] - 2026-01-11
+
+### Changed
+
+- Updated MQTT integration setup instructions (click ADD instead of CONFIGURE, click START instead of RESTART)
+- Addon now stays running after installation to keep logo colored in UI
+- Graceful shutdown handling for clean updates and restarts
+
 ## [0.8.52] - 2026-01-11
 
 ### Added
