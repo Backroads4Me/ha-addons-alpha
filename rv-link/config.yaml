@@ -2,7 +2,7 @@
 name: "RV Link"
 version: "0.8.54"
 slug: "rv-link"
-description: "RV Link: For controlling and monitoring RV systems."
+description: "RV Link: For controlling and monitoring RV systems"
 url: "https://github.com/Backroads4Me/ha-addons"
 maintainer: "Ted Lanham <tedlanham@gmail.com>"
 arch:

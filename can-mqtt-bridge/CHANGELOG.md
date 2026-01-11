@@ -1,3 +1,9 @@
+## [1.0.1] - 2026-01-11
+
+### Fixed
+
+- Prioritized manual MQTT configuration over Service Discovery. This ensures that when the add-on is orchestrated by another add-on (like RV-Link) which provides specific credentials, those credentials are used effectively.
+
 ## [1.0.0] - 2025-10-22
 
 ### Changed

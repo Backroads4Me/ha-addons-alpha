@@ -19,21 +19,32 @@ mkdir -p /var/run/s6/healthcheck
 CAN_INTERFACE=$(bashio::config 'can_interface')
 CAN_BITRATE=$(bashio::config 'can_bitrate')
 
-# Try to use service discovery for MQTT broker
-if bashio::services.available "mqtt"; then
+# Check for manual configuration first (prioritize over service discovery)
+# This allows the orchestrator (RV Link) to override the default broker
+MQTT_HOST=$(bashio::config 'mqtt_host')
+
+if bashio::config.has_value 'mqtt_host'; then
+    bashio::log.info "Using manual MQTT configuration"
+    MQTT_HOST=$(bashio::config 'mqtt_host')
+    MQTT_PORT=$(bashio::config 'mqtt_port')
+    MQTT_USER=$(bashio::config 'mqtt_user')
+    MQTT_PASS=$(bashio::config 'mqtt_pass')
+elif bashio::services.available "mqtt"; then
+    # Fall back to service discovery
     bashio::log.info "MQTT service discovered"
     MQTT_HOST=$(bashio::services "mqtt" "host")
     MQTT_PORT=$(bashio::services "mqtt" "port")
     MQTT_USER=$(bashio::services "mqtt" "username")
     MQTT_PASS=$(bashio::services "mqtt" "password")
 else
-    # Fall back to manual configuration
-    bashio::log.info "Using manual MQTT configuration"
+    # No config found
+    bashio::log.info "No MQTT configuration found - defaulting to manual config values (likely empty)"
     MQTT_HOST=$(bashio::config 'mqtt_host')
     MQTT_PORT=$(bashio::config 'mqtt_port')
     MQTT_USER=$(bashio::config 'mqtt_user')
     MQTT_PASS=$(bashio::config 'mqtt_pass')
 fi
+
 MQTT_TOPIC_RAW=$(bashio::config 'mqtt_topic_raw')
 MQTT_TOPIC_SEND=$(bashio::config 'mqtt_topic_send')
 MQTT_TOPIC_STATUS=$(bashio::config 'mqtt_topic_status')

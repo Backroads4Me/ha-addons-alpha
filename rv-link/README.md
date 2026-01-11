@@ -1,6 +1,6 @@
 # RV Link - RV Control System
 
-RV Link transforms a Raspberry Pi into a professional RV control center. It integrates your RV's RV-C network directly with Home Assistant allowing you to control and monitor your RV from mobile device or pc.
+RV Link transforms a Raspberry Pi into a professional RV control center. It integrates your RV's RV-C network directly with Home Assistant allowing you to control and monitor your RV from mobile device.
 
 ### The "App" vs. The "Installer"
 To make setup easy, RV Link is delivered as a **Home Assistant Add-on**.
@@ -9,9 +9,9 @@ To make setup easy, RV Link is delivered as a **Home Assistant Add-on**.
 
 ## ✨ Features
 
--   **🧠 System Orchestrator**: One-click setup. The add-on automatically installs and configures the official Mosquitto Broker, CAN-to-MQTT Bridge, and Node-RED.
--   **🔌 Hardware Bridge**: Connects directly to your CAN hardware (e.g., Waveshare HAT) and bridges RV-C network traffic to Home Assistant.
--   **📦 Project Bundler**: Deploys pre-configured RV Link automation flows to instantly interpret your RV's data.
+-   **System Orchestrator**: One-click setup. The add-on automatically installs and configures the official Mosquitto Broker, CAN-to-MQTT Bridge, and Node-RED.
+-   **Hardware Bridge**: Connects directly to your CAN hardware (e.g., Waveshare HAT) and bridges RV-C network traffic to Home Assistant.
+-   **Project Bundler**: Deploys pre-configured RV Link automation flows to instantly interpret your RV's data.
 
 ## ⚠️ Requirements
 
@@ -44,11 +44,19 @@ For full configuration options, troubleshooting, and guides, please visit:
 * **Documentation:** [Read the Docs](DOCS.md)
 
 ---
+## Author
+
+Created and maintained by Ted Lanham ([@Backroads4Me](https://github.com/Backroads4Me))
+
+Questions or issues? Open an issue on GitHub or contact Backroads4Me@gmail.com
 
 ## Support the Project
 
-RV Link is free and open-source. If it's saved you time or money, consider supporting continued development:
+RV Link is free and open source. If it’s helped you or saved you time, consider supporting continued development:
 
-[![Support RV Link](https://img.shields.io/badge/Support-RV_Link-ea4aaa?style=for-the-badge&logo=github-sponsors&logoColor=white)](https://github.com/sponsors/Backroads4Me)
+[![Support RV Link](https://img.shields.io/badge/Sponsor_on_GitHub-41BDF5?style=for-the-badge&logo=github-sponsors&logoColor=white
+)](https://github.com/sponsors/Backroads4Me)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/backroads4me)
+
 
 Your support helps fund hardware testing, infrastructure costs, and those late-night coding sessions. ☕
