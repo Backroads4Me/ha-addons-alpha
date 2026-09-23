@@ -232,6 +232,9 @@ class HughesProbeHandler(HughesHandler):
     """HughesHandler that also records a protocol probe on Gen2 devices."""
 
     report_dir = None
+    # Reconnect the moment the Watchdog powers back up, so the probe records
+    # its startup delay (relay open, then closed) after a shore-power cut.
+    reconnect_on_advertisement = True
 
     def __init__(self, address, config):
         super().__init__(address, config)

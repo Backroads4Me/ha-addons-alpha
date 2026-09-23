@@ -73,10 +73,12 @@ change. Only do the steps you are comfortable with.
 3. **Backlight (known control):** `backlight 1`, set Backlight Brightness to 1,
    then return it to where it was. This checks the method against a byte we
    already understand.
-4. **Startup delay:** `startup delay`. Switch the pedestal breaker off, wait 10
-   seconds and switch it on. Press **BLE Reconnect** as soon as the Watchdog
-   powers up, and let it run until the relay clicks in and the coach has power.
-   This interrupts shore power briefly.
+4. **Startup delay:** `startup delay`, set while the Watchdog is still
+   connected. Switch the pedestal breaker off, wait 10 seconds and switch it on.
+   The probe reconnects as soon as the Watchdog advertises again, so leave it
+   running until the relay clicks in and the coach has power. If **Probe Last
+   Change** shows no change to `L1.33` afterwards, press **BLE Reconnect** the
+   moment the display lights up and repeat. This interrupts shore power briefly.
 5. **Relay control (optional):** only if the coach can run on batteries or an
    inverter for a minute. Set `relay OFF command`, turn Shore Power Relay off,
    then set `relay ON command` and turn it back on.

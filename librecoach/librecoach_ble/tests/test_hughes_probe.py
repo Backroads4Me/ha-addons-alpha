@@ -22,6 +22,10 @@ def test_alpha_registry_uses_the_probe_handler():
     assert HughesProbeHandler in DEVICE_HANDLERS
 
 
+def test_probe_reconnects_as_soon_as_the_watchdog_advertises():
+    assert HughesProbeHandler.reconnect_on_advertisement is True
+
+
 def test_changes_are_logged_against_the_active_scenario():
     handler = probe_handler()
     feed(handler, v2_block(121.4, 14.3, 1735.0, 142.3), v2_block(120.2, 8.1, 973.6, 42.3))
