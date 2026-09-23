@@ -229,6 +229,18 @@ def test_captured_e5_frame_decodes_power_factor_and_neutral_monitoring():
     assert "relay_status" not in state
 
 
+def test_line_sums_carry_no_float_tail():
+    handler = HughesHandler("AA:BB", {"_device_name": "WD_E5_123"})
+    state = handler.parse_status(v2_frame(
+        v2_block(122.7739, 1.8202, 207.2069, 2508.4),
+        v2_block(123.5501, 1.9887, 49.9319, 1894.21),
+    ))
+
+    assert state["energy_kwh"] == 4402.61
+    assert json.dumps(state["energy_kwh"]) == "4402.61"
+    assert state["combined_power"] == 257.1388
+
+
 def test_captured_e5_frame_reports_neutral_monitoring_bypassed():
     handler = HughesHandler("AA:BB", {"_device_name": "WD_E5_9e9e6e2e0ea9"})
     state = handler.parse_status(E5_MONITORING_BYPASSED)

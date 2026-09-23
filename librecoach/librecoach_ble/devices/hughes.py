@@ -76,6 +76,11 @@ IMMEDIATE_PUBLISH_FIELDS = (
     "error_history",
 )
 
+# Decimal places the Watchdog reports (values are scaled by 10000). Sums of two
+# lines are rounded to this so float addition cannot add a spurious tail
+# (2508.4 + 1894.21 == 4402.610000000001).
+REPORTED_DECIMALS = 4
+
 # Error code the Watchdog reports for a lost neutral on either line.
 NEUTRAL_FAULT_CODE = 8
 
@@ -443,7 +448,7 @@ class HughesHandler(BleDeviceHandler):
         energy_l2 = line_2.get("energy")
         energy = energy_l1
         if energy is not None and energy_l2 is not None:
-            energy += energy_l2
+            energy = round(energy + energy_l2, REPORTED_DECIMALS)
         error_l1 = line_1.get("error_code")
         error_l2 = line_2.get("error_code")
         available_errors = [
@@ -479,7 +484,7 @@ class HughesHandler(BleDeviceHandler):
             "power_factor_l2": line_2.get("power_factor"),
             "energy_kwh": energy,
             "combined_power": (
-                line_1.get("power", 0) + line_2.get("power", 0)
+                round(line_1.get("power", 0) + line_2.get("power", 0), REPORTED_DECIMALS)
                 if line_1 else None
             ),
             "error_code": active_error,
