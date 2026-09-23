@@ -66,6 +66,7 @@ def test_discovery_joins_the_hughes_device_and_is_not_retained():
         "homeassistant/sensor/hughes_aa_bb_probe_report/config",
         "homeassistant/button/hughes_aa_bb_probe_export/config",
         "homeassistant/button/hughes_aa_bb_probe_reset/config",
+        "homeassistant/button/hughes_aa_bb_probe_remove_entities/config",
     }
     assert not any(m.retain for m in configs.values())
     scenario = json.loads(configs["homeassistant/text/hughes_aa_bb_probe_scenario/config"].payload)
@@ -122,3 +123,21 @@ def test_reset_clears_the_recording():
 
     assert handler.probe.scenario == "unlabelled"
     assert list(handler.probe.events) == []
+
+
+def test_remove_entities_deletes_discovery_once_and_stops_republishing():
+    handler = probe_handler()
+    state = feed(handler, v2_block(121.4, 14.3, 1735.0, 142.3))
+    created = [m.topic for m in handler.state_messages(state) if m.topic.endswith("/config")]
+
+    assert run(handler.handle_command(None, {"command": "probe_remove_entities"})) is True
+    removal = handler.state_messages(state)
+    deletes = [m for m in removal if m.topic.endswith("/config")]
+    assert sorted(m.topic for m in deletes) == sorted(created)
+    assert all(m.payload == "" and m.retain for m in deletes)
+    assert not any(m.topic.endswith("/probe") for m in removal)
+
+    # A reconnect (which clears the sent flag) must not bring the entities back.
+    handler._probe_discovery_sent = False
+    after = handler.state_messages(state)
+    assert not any(m.topic.endswith(("/config", "/probe")) for m in after)

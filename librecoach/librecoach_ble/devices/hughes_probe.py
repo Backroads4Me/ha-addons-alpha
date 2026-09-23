@@ -239,6 +239,8 @@ class HughesProbeHandler(HughesHandler):
         self._probe_discovery_sent = False
         self._probe_dirty = True
         self._probe_published = 0.0
+        self._probe_removed = False
+        self._probe_removal_pending = False
 
     @property
     def _probing(self) -> bool:
@@ -259,6 +261,10 @@ class HughesProbeHandler(HughesHandler):
         if self._probing and action == "probe_reset":
             self.probe.reset()
             self._probe_dirty = True
+            return True
+        if self._probing and action == "probe_remove_entities":
+            self._probe_removed = True
+            self._probe_removal_pending = True
             return True
         if self._probing and action == "probe_export":
             await self._export_report()
@@ -293,6 +299,15 @@ class HughesProbeHandler(HughesHandler):
         messages = super().state_messages(parsed)
         if not self._probing:
             return messages
+        if self._probe_removed:
+            if self._probe_removal_pending:
+                # An empty discovery payload deletes the entity from Home Assistant.
+                messages.extend(
+                    StateMessage(message.topic, "", retain=True)
+                    for message in self._probe_discovery()
+                )
+                self._probe_removal_pending = False
+            return messages
         if not self._probe_discovery_sent:
             messages.extend(self._probe_discovery())
             self._probe_discovery_sent = True
@@ -309,8 +324,9 @@ class HughesProbeHandler(HughesHandler):
         return messages
 
     def _probe_discovery(self) -> list[StateMessage]:
-        # Not retained: a user who moves to a production build keeps no probe
-        # entities after the next Home Assistant restart.
+        # Not retained, so nothing re-creates the entities once the tester leaves
+        # alpha. Probe Remove Entities deletes them before that; entities left
+        # behind become orphans the tester deletes in Home Assistant.
         safe = self.address.replace(":", "_")
         base_id = f"hughes_{safe}_probe"
         probe_topic = PROBE_TOPIC.format(address=self.address)
@@ -357,6 +373,13 @@ class HughesProbeHandler(HughesHandler):
                 "command_topic": set_topic,
                 "payload_press": '{"command": "probe_reset"}',
                 "icon": "mdi:restart",
+                "entity_category": "config",
+            }),
+            ("button", "remove_entities", {
+                "name": "Probe Remove Entities",
+                "command_topic": set_topic,
+                "payload_press": '{"command": "probe_remove_entities"}',
+                "icon": "mdi:delete-outline",
                 "entity_category": "config",
             }),
         ]

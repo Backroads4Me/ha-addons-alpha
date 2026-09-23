@@ -20,8 +20,12 @@ file and sends it back. We then encode the findings in `hughes.py`.
 - `devices/__init__.py` swaps in `HughesProbeHandler`. `sync-from-beta.sh` keeps
   both files and re-applies that swap after copying beta's source.
 - The probe publishes its own MQTT discovery without retain, so the shared
-  Node-RED flows carry nothing for it. After a tester moves back to beta or
-  stable, the probe entities go away when Home Assistant next restarts.
+  Node-RED flows carry nothing for it, and the beta-flag cleanup in Node-RED
+  (`betaDiscoveryTopics`) cannot see or remove its entities.
+- Testers remove the entities with **Probe Remove Entities** before leaving
+  alpha. Beta and stable have no probe code, so after a switch the only way to
+  remove leftovers is by hand: Settings → Devices & services → Entities, filter
+  on "Probe", select them and delete. They show as "no longer provided".
 - To retire the probe, delete both files, the `__init__.py` block, the
   `ALPHA_ONLY` entries and the registration step in `sync-from-beta.sh`.
 
@@ -45,6 +49,7 @@ only:
 | **Probe Export Report** (button) | Writes the report and posts a Home Assistant notification with a download link. |
 | **Probe Report** (sensor) | When the last report was written and where. |
 | **Probe Reset** (button) | Clears the recording to start a fresh session. |
+| **Probe Remove Entities** (button) | Deletes all probe entities from Home Assistant. Press it last, before switching back to beta or stable. Restarting Home Assistant while still on alpha brings them back. |
 
 - The recording is held in memory and is lost if Home Assistant restarts, so
   export before any restart.
@@ -79,7 +84,8 @@ change. Only do the steps you are comfortable with.
    what the display says.
 
 Finish with **Probe Export Report**, open the link in the notification, save
-the file and send it to us.
+the file and send it to us. Then press **Probe Remove Entities** before
+switching back to beta or stable.
 
 ## Reading a report
 
