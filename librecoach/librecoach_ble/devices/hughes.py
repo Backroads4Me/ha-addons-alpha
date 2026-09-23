@@ -56,6 +56,8 @@ PUBLISH_DEADBANDS = {
     "combined_power": 25.0,
     "frequency_l1": 0.1,
     "frequency_l2": 0.1,
+    "power_factor_l1": 0.01,
+    "power_factor_l2": 0.01,
     "energy_l1": 0.01,
     "energy_l2": 0.01,
     "energy_kwh": 0.01,
@@ -67,12 +69,15 @@ IMMEDIATE_PUBLISH_FIELDS = (
     "is_50a",
     "error_code_l1",
     "error_code_l2",
-    "relay_status",
-    "neutral_detection",
+    "neutral_monitoring",
+    "neutral_problem",
     "backlight",
     "boost_mode",
     "error_history",
 )
+
+# Error code the Watchdog reports for a lost neutral on either line.
+NEUTRAL_FAULT_CODE = 8
 
 # V1 hardware revision, from name[15:17]. E2 predates the error-code byte and
 # uses inverted line markers; E3/E4 share the current behaviour.
@@ -398,8 +403,10 @@ class HughesHandler(BleDeviceHandler):
         self._line_1 = self._parse_v2_line(raw, 9)
         self._line_2 = self._parse_v2_line(raw, 43) if payload_length == 68 else None
         state = self._build_state("V2")
+        # Byte 33 of each line block is not relay state: a startup-delay capture
+        # showed it fixed at 0 for L1 and 1 for L2 while the relay opened and
+        # closed. Gen2 telemetry carries no relay state, so none is reported.
         state.update({
-            "relay_status": raw[42],
             "backlight": raw[33],
             "output_voltage": None,
             "temperature": None,
@@ -420,9 +427,13 @@ class HughesHandler(BleDeviceHandler):
             "current": struct.unpack(">I", raw[offset + 4:offset + 8])[0] / 10000,
             "power": struct.unpack(">I", raw[offset + 8:offset + 12])[0] / 10000,
             "energy": struct.unpack(">I", raw[offset + 12:offset + 16])[0] / 10000,
+            # Watts / (volts * amps), scaled by 1000; matched to 0.001 in captures.
+            "power_factor": struct.unpack(">I", raw[offset + 16:offset + 20])[0] / 1000,
             "frequency": struct.unpack(">I", raw[offset + 28:offset + 32])[0] / 100,
             "error_code": raw[offset + 32],
-            "neutral_detection": raw[offset + 25],
+            # Neutral monitoring setting: 0 = enabled, 1 = bypassed. It follows
+            # the neutral-detection command; a lost neutral is error code 8.
+            "neutral_monitoring": raw[offset + 25] == 0,
         }
 
     def _build_state(self, protocol: str) -> dict:
@@ -442,15 +453,10 @@ class HughesHandler(BleDeviceHandler):
             (code for code in available_errors if code != 0),
             available_errors[0] if available_errors else None,
         )
-        neutral_l1 = line_1.get("neutral_detection")
-        neutral_l2 = line_2.get("neutral_detection")
-        available_neutral = [
-            value for value in (neutral_l1, neutral_l2) if value is not None
+        monitoring = [
+            line["neutral_monitoring"] for line in (line_1, line_2)
+            if line.get("neutral_monitoring") is not None
         ]
-        neutral_status = next(
-            (value for value in available_neutral if value != 0),
-            available_neutral[0] if available_neutral else None,
-        )
         state = {
             "device_name": self.device_name,
             "protocol": protocol,
@@ -462,7 +468,7 @@ class HughesHandler(BleDeviceHandler):
             "energy_l1": energy_l1,
             "error_code_l1": error_l1,
             "error_description_l1": self._error_description(error_l1),
-            "neutral_detection_l1": neutral_l1,
+            "power_factor_l1": line_1.get("power_factor"),
             "voltage_l2": line_2.get("voltage"),
             "current_l2": line_2.get("current"),
             "power_l2": line_2.get("power"),
@@ -470,7 +476,7 @@ class HughesHandler(BleDeviceHandler):
             "energy_l2": energy_l2,
             "error_code_l2": error_l2,
             "error_description_l2": self._error_description(error_l2),
-            "neutral_detection_l2": neutral_l2,
+            "power_factor_l2": line_2.get("power_factor"),
             "energy_kwh": energy,
             "combined_power": (
                 line_1.get("power", 0) + line_2.get("power", 0)
@@ -478,7 +484,11 @@ class HughesHandler(BleDeviceHandler):
             ),
             "error_code": active_error,
             "error_description": self._error_description(active_error),
-            "neutral_detection": neutral_status,
+            # Enabled only when every line reports it enabled.
+            "neutral_monitoring": all(monitoring) if monitoring else None,
+            "neutral_problem": (
+                NEUTRAL_FAULT_CODE in available_errors if available_errors else None
+            ),
             "supports_control": protocol == "V2",
             "supports_error_history": protocol == "V2",
             "has_booster": self.has_booster,

@@ -30,23 +30,23 @@ REPORT_NAME = "librecoach_hughes_probe.txt"
 DEFAULT_REPORT_DIR = "/config/www"
 
 V2_LINE_OFFSETS = (9, 43)
-# Non-measurement bytes of each 34-byte line block. Names ending in "?" are the
-# current decoder's reading, which the probe exists to confirm or refute.
+# Non-measurement bytes of each 34-byte line block. Names ending in "?" are
+# unconfirmed readings the probe exists to confirm or refute.
 WATCHED_BYTES = {
-    16: "unknown",
-    17: "unknown",
-    18: "unknown",
-    19: "unknown",
+    16: "power_factor b0",
+    17: "power_factor b1",
+    18: "power_factor b2",
+    19: "power_factor b3",
     20: "output_voltage (booster) b0",
     21: "output_voltage (booster) b1",
     22: "output_voltage (booster) b2",
     23: "output_voltage (booster) b3",
     24: "backlight",
-    25: "neutral_detection?",
+    25: "neutral_monitoring (0=on, 1=bypassed)",
     26: "boost_mode (booster)?",
     27: "temperature (booster)?",
     32: "error_code",
-    33: "relay_status?",
+    33: "line index? (0=L1, 1=L2; not relay)",
 }
 
 MAX_EVENTS = 5000
@@ -158,7 +158,7 @@ class HughesProbe:
     def _context(parsed: dict) -> dict:
         fields = (
             "voltage_l1", "current_l1", "voltage_l2", "current_l2",
-            "error_code_l1", "error_code_l2", "relay_status", "neutral_detection",
+            "error_code_l1", "error_code_l2", "neutral_monitoring", "neutral_problem",
         )
         return {field: parsed.get(field) for field in fields if parsed.get(field) is not None}
 

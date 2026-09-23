@@ -38,8 +38,8 @@ def test_changes_are_logged_against_the_active_scenario():
 
     changes = [event for event in handler.probe.events if event["kind"] == "change"]
     assert [(event["byte"], event["old"], event["new"]) for event in changes] == [
-        ("L1.25 raw[34] neutral_detection?", 0, 1),
-        ("L2.33 raw[76] relay_status?", 0, 2),
+        ("L1.25 raw[34] neutral_monitoring (0=on, 1=bypassed)", 0, 1),
+        ("L2.33 raw[76] line index? (0=L1, 1=L2; not relay)", 0, 2),
     ]
     assert {event["scenario"] for event in changes} == {"neutral off"}
     assert changes[0]["context"]["voltage_l1"] == 121.5
@@ -114,8 +114,8 @@ def test_export_writes_a_report_with_scenarios_and_timeline(tmp_path):
     assert run(handler.handle_command(None, {"command": "probe_export"})) is True
     report = (tmp_path / REPORT_NAME).read_text()
     assert "] startup delay  (2 frames)" in report
-    assert "L1.33 raw[42] relay_status?: 0, 1" in report
-    assert "L1.33 raw[42] relay_status?: 0 -> 1" in report
+    assert "L1.33 raw[42] line index? (0=L1, 1=L2; not relay): 0, 1" in report
+    assert "L1.33 raw[42] line index? (0=L1, 1=L2; not relay): 0 -> 1" in report
     assert f"/local/{REPORT_NAME}?v=" in handler.probe.state()["report"]
 
 
