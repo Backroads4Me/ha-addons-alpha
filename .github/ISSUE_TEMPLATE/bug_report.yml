@@ -1,38 +1,34 @@
-name: Bug Report
-description: Report a bug or issue with an addon
+name: Bug report
+description: Report a problem with an add-on
 title: "[BUG] "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
-      value: |
-        Thanks for taking the time to report a bug! Please fill out the information below to help us resolve the issue.
+      value: Please remove passwords, tokens, and other sensitive information from logs and configuration.
 
   - type: dropdown
     id: addon
     attributes:
-      label: Addon
-      description: Which addon is this bug report for?
+      label: Add-on
+      description: Which add-on has the problem?
       options:
-        - Bluetooth WiFi Setup
-        - CAN to MQTT Bridge
+        - LibreCoach
     validations:
       required: true
 
   - type: input
     id: version
     attributes:
-      label: Addon Version
-      description: What version of the addon are you running?
-      placeholder: "e.g., 1.0.0"
+      label: Add-on version
+      placeholder: "For example: 2.0.0"
     validations:
       required: true
 
   - type: textarea
     id: description
     attributes:
-      label: Bug Description
-      description: Clear and concise description of the bug
+      label: What happened?
       placeholder: What happened? What did you expect to happen?
     validations:
       required: true
@@ -40,12 +36,11 @@ body:
   - type: textarea
     id: steps
     attributes:
-      label: Steps to Reproduce
-      description: Steps to reproduce the behavior
+      label: Steps to reproduce
       placeholder: |
         1. Go to '...'
         2. Configure '...'
-        3. Start addon
+        3. Start the add-on
         4. See error
     validations:
       required: true
@@ -53,35 +48,26 @@ body:
   - type: textarea
     id: config
     attributes:
-      label: Addon Configuration
-      description: Your addon configuration (remove sensitive information like passwords)
-      placeholder: |
-        ```yaml
-        # Paste your config.yaml here
-        ```
+      label: Add-on configuration
+      description: Paste the relevant configuration after removing sensitive values.
       render: yaml
 
   - type: textarea
     id: logs
     attributes:
-      label: Addon Logs
-      description: Relevant log output from the addon
-      placeholder: |
-        ```
-        Paste logs here
-        ```
+      label: Add-on logs
+      description: Paste the relevant log output.
       render: shell
 
   - type: markdown
     attributes:
-      value: "You can find your Home Assistant Version and Hardware information under **Settings > System > Repairs > (⋮) > System Information**."
+      value: Find Home Assistant and hardware details under **Settings → System → Repairs → ⋮ → System information**.
 
   - type: input
     id: ha-version
     attributes:
-      label: Home Assistant Version
-      description: What version of Home Assistant are you running?
-      placeholder: "e.g., 2024.10.0"
+      label: Home Assistant version
+      placeholder: "For example: 2026.6.0"
     validations:
       required: true
 
@@ -89,14 +75,12 @@ body:
     id: hardware
     attributes:
       label: Hardware
-      description: What hardware are you using?
-      placeholder: "e.g., Raspberry Pi 5, Generic x86"
+      placeholder: "For example: Raspberry Pi 5 or generic x86-64"
     validations:
       required: true
 
   - type: textarea
     id: additional
     attributes:
-      label: Additional Context
-      description: Any other context about the problem
-      placeholder: Screenshots, workarounds, related issues, etc.
+      label: Additional context
+      placeholder: Screenshots, workarounds, or related issues

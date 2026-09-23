@@ -23,6 +23,12 @@ venv/
 ENV/
 env/
 
+# Testing
+.pytest_cache/
+.benchmarks/
+.coverage
+htmlcov/
+
 # IDEs
 .vscode/
 .idea/
@@ -30,9 +36,6 @@ env/
 *.swo
 *~
 .DS_Store
-.claude/
-CLAUDE.md
-GEMINI.md
 
 # Docker
 *.tar
@@ -41,18 +44,16 @@ GEMINI.md
 # Logs
 *.log
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
 # Home Assistant
 secrets.yaml
+.env
+options.json
 *.db
 *.db-shm
 *.db-wal
 
 # Temporary files
+TODO.md
 tmp/
 temp/
 *.tmp

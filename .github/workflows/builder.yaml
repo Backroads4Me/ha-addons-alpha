@@ -1,202 +1,363 @@
-name: Build Add-ons
-
-permissions:
-  contents: read
-  packages: write
-
-env:
-  SUFFIX: alpha
+name: Build add-ons
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Rebuild every add-on, even versions already published (overwrites those tags)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Publishing is a read-modify-write against the registry: a run decides what is
+# missing, then writes it. Two overlapping runs can both see the same gap and
+# race to publish the same tag from different commits. Serialize per ref, and
+# never cancel a run mid-publish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Production builds the same add-on with no suffix. Every package name is
+  # built through package_name(), which omits the trailing hyphen when this is
+  # empty, so porting to prod is just clearing this value.
+  IMAGE_SUFFIX: alpha
 
 jobs:
-  init:
-    name: Initialize builds
+  changes:
+    name: Select add-ons
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     outputs:
-      changed_addons: ${{ steps.changed_addons.outputs.addons }}
-      changed: ${{ steps.changed_addons.outputs.changed }}
+      addons: ${{ steps.select.outputs.addons }}
+      targets: ${{ steps.select.outputs.targets }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Find add-on directories with changes
-        id: changed_addons
+      # A push builds whatever config.yaml declares but the registry does not
+      # yet carry. The question is about state, not about this push's diff, so
+      # the answer stays true until the image exists: a push whose build never
+      # ran (a failed gate, a skipped job) is repaired by the next push instead
+      # of being lost with the diff that carried the version bump.
+      #
+      # Selection is per (add-on, arch) rather than per add-on. A version is not
+      # one artifact — it is one image per arch — so selecting the whole add-on
+      # when a single arch is missing would rebuild and overwrite the arch that
+      # published successfully. Only the missing arch is rebuilt.
+      - name: Select builds
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE: ${{ github.event.inputs.force }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+          IMAGE_SUFFIX: ${{ env.IMAGE_SUFFIX }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
         run: |
-          declare -a changed_addons
-          build_all=false
+          set -euo pipefail
 
-          echo "Event type: ${{ github.event_name }}"
+          # Must match the arch list the build matrix derives from targets.
+          ARCHES=(aarch64 amd64)
 
-          # Manual trigger builds all
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "Manual trigger - building all addons"
-            build_all=true
-          fi
+          # Production publishes without a suffix; omit the hyphen when unset so
+          # the same code ports unchanged.
+          package_name() {
+            printf '%s-%s%s' "$1" "$2" "${IMAGE_SUFFIX:+-$IMAGE_SUFFIX}"
+          }
 
-          echo "build_all=$build_all"
-          echo "Searching for addons..."
+          # A 404 on one package is ambiguous: the package may not exist yet, or
+          # this token may simply not be allowed to see it. Only a package query
+          # that actually succeeded proves the token can read this owner's
+          # packages, so 404s are recorded and judged after the loop, once it is
+          # known whether any query succeeded at all. (The obvious probe —
+          # listing the owner's packages — is not usable: GITHUB_TOKEN gets
+          # HTTP 400 from /users/{owner}/packages, while the per-package
+          # versions endpoint below works.)
+          registry_readable=false
 
-          # Find all addons
-          for addon in $(find . -maxdepth 1 -type d -not -path '*/\.*' -not -path '.' | cut -d'/' -f2); do
-            echo "Checking directory: $addon"
-            # Skip non-addon directories
-            if [[ "$addon" == "docs" ]] || [[ "$addon" == ".github" ]]; then
-              continue
-            fi
+          # 0 = published, 1 = 404, 2 = present but this version absent.
+          # Any other failure exits.
+          tag_published() {
+            local package=$1 version=$2 out status
+            out=$(gh api --paginate \
+                    "/users/$OWNER/packages/container/$package/versions" \
+                    --jq '.[].metadata.container.tags[]' 2>&1) && status=0 || status=$?
 
-            # Check if addon has config.yaml
-            if [[ -f "$addon/config.yaml" ]]; then
-              if [[ "$build_all" == "true" ]]; then
-                # Build all addons
-                echo "Adding $addon to build queue"
-                changed_addons+=("\"$addon\"")
-              else
-                # Check if config.yaml in this addon changed (version bump indicates release)
-                if git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -q "^$addon/config\.yaml$"; then
-                  echo "config.yaml changed in $addon - triggering build"
-                  changed_addons+=("\"$addon\"")
-                fi
+            if [ "$status" -ne 0 ]; then
+              if grep -q 'HTTP 404' <<< "$out"; then
+                return 1
               fi
+              # 401, 403, 5xx: fail loudly rather than read it as absent, or an
+              # outage would rebuild over a live tag.
+              echo "::error::could not query ghcr for $package: $out"
+              exit 1
             fi
+
+            registry_readable=true
+            grep -Fxq "$version" <<< "$out" && return 0
+            return 2
+          }
+
+          targets=()
+          addons=()
+          unseen=()   # "addon arch version package": 404, verdict deferred
+
+          queue() {
+            echo "queueing $1 $3 for $2"
+            targets+=("$(jq -cn --arg addon "$1" --arg arch "$2" \
+                          '{addon: $addon, arch: $arch}')")
+          }
+
+          for config in */config.yaml; do
+            addon=${config%%/*}
+            version=$(yq -r '.version' "$config")
+
+            for arch in "${ARCHES[@]}"; do
+              case "$EVENT_NAME" in
+                pull_request)
+                  # PRs validate the tree and never push tags, so the registry
+                  # says nothing useful about them; build whatever the PR
+                  # touches.
+                  git diff --quiet "$BASE_SHA...$HEAD_SHA" -- "$addon/" && continue
+                  queue "$addon" "$arch" "$version"
+                  continue
+                  ;;
+                workflow_dispatch)
+                  # A plain dispatch repairs what is missing. Overwriting a
+                  # published tag is destructive, so it takes an explicit force.
+                  if [ "$FORCE" = "true" ]; then
+                    queue "$addon" "$arch" "$version"
+                    continue
+                  fi
+                  ;;
+              esac
+
+              package=$(package_name "$arch" "$addon")
+              tag_published "$package" "$version" && continue || status=$?
+
+              if [ "$status" -eq 1 ]; then
+                unseen+=("$addon $arch $version $package")
+              else
+                queue "$addon" "$arch" "$version"
+              fi
+            done
           done
 
-          changed=$(printf ",%s" "${changed_addons[@]}")
-          changed="[${changed:1}]"
+          # Every 404 is now either a package that has genuinely never been
+          # published, or a package this token cannot see. If no query in this
+          # run succeeded, there is no way to tell them apart — refuse rather
+          # than risk republishing over a tag that is actually live. Publishing
+          # a brand new package for the first time is the legitimate case, and
+          # it goes through a forced dispatch.
+          if [ ${#unseen[@]} -gt 0 ] && [ "$registry_readable" != true ]; then
+            echo "::error::no package query succeeded, so these 404s cannot be" \
+                 "distinguished from packages this token cannot see:"
+            printf '::error::  %s\n' "${unseen[@]}"
+            echo "::error::If this is a first-ever publish, re-run with force enabled."
+            exit 1
+          fi
 
-          echo "changed=${changed}" >> $GITHUB_OUTPUT
-          echo "addons=${changed}" >> $GITHUB_OUTPUT
+          for entry in ${unseen[@]+"${unseen[@]}"}; do
+            read -r addon arch version _ <<< "$entry"
+            queue "$addon" "$arch" "$version"
+          done
 
-          if [ "$changed" == "[]" ]; then
-            echo "No add-on changes detected"
+          # version-check runs per add-on, so reduce the targets to the distinct
+          # add-ons they cover. Guarded: printf with no arguments would still
+          # emit one empty line and yield a bogus [""].
+          if [ ${#targets[@]} -gt 0 ]; then
+            mapfile -t addons < <(printf '%s\n' "${targets[@]}" | jq -r '.addon' | sort -u)
+          fi
+
+          jq -cn --args '$ARGS.positional' ${addons[@]+"${addons[@]}"} \
+            | sed 's/^/addons=/' >> "$GITHUB_OUTPUT"
+          printf '%s\n' ${targets[@]+"${targets[@]}"} | jq -cs . \
+            | sed 's/^/targets=/' >> "$GITHUB_OUTPUT"
+
+  version-check:
+    name: Check version against changelog
+    needs: changes
+    if: needs.changes.outputs.addons != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        addon: ${{ fromJSON(needs.changes.outputs.addons) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # Alpha iterates toward a release rather than past one, so config.yaml
+      # carries a pre-release version such as 1.5.3-alpha.4 and the changelog
+      # carries the release it is heading for. Both checks run against that
+      # base version, which is what production will publish unchanged.
+      - name: config.yaml version matches the newest changelog entry
+        run: |
+          set -euo pipefail
+          addon="${{ matrix.addon }}"
+          cfg=$(yq -r '.version' "$addon/config.yaml")
+          base=${cfg%%-*}
+          if [ "$base" != "$cfg" ] && \
+             ! grep -qE '^[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$' <<< "$cfg"; then
+            echo "::error::$cfg is not a release or a <version>-alpha.<n> pre-release"
+            exit 1
+          fi
+          mapfile -t vers < <(grep -oP '^### \K[0-9]+\.[0-9]+\.[0-9]+' "$addon/CHANGELOG.md")
+          newest="${vers[0]}"
+          if [ "$base" != "$newest" ]; then
+            echo "::error::config.yaml is $cfg but the newest CHANGELOG entry is $newest"
+            exit 1
+          fi
+          echo "version $cfg targets $newest, which the changelog documents"
+
+      - name: A release with new features is a minor bump
+        run: |
+          set -euo pipefail
+          addon="${{ matrix.addon }}"
+          mapfile -t vers < <(grep -oP '^### \K[0-9]+\.[0-9]+\.[0-9]+' "$addon/CHANGELOG.md")
+          newest="${vers[0]}"; prev="${vers[1]:-0.0.0}"
+          # Body of the newest entry only, i.e. up to the next "### " heading.
+          body=$(awk '/^### /{n++} n==1' "$addon/CHANGELOG.md")
+          IFS=. read -r nmaj nmin _ <<< "$newest"
+          IFS=. read -r pmaj pmin _ <<< "$prev"
+          if grep -q '✨ New' <<< "$body"; then
+            if [ "$nmaj" = "$pmaj" ] && [ "$nmin" = "$pmin" ]; then
+              echo "::error::$newest declares new features but is only a patch bump over $prev"
+              exit 1
+            fi
+            echo "$newest declares features and bumps the minor over $prev"
           else
-            echo "Changed add-ons: $changed"
+            echo "$newest declares no new features; any bump is fine"
           fi
 
   build:
-    needs: init
+    name: Build ${{ matrix.addon }} (${{ matrix.arch }})
+    needs: [changes, version-check]
+    if: needs.changes.outputs.targets != '[]'
     runs-on: ubuntu-latest
-    if: needs.init.outputs.changed != '[]'
-    name: Build ${{ matrix.addon }} add-on
     permissions:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
+      # Exact (add-on, arch) pairs, not a cross product: an arch that is already
+      # published must not be rebuilt just because its sibling is missing.
       matrix:
-        addon: ${{ fromJson(needs.init.outputs.changed_addons) }}
-        arch: ["aarch64", "amd64", "armv7"]
+        include: ${{ fromJSON(needs.changes.outputs.targets) }}
+
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Get add-on information
-        id: info
+      - name: Read build settings
+        id: settings
+        env:
+          ADDON: ${{ matrix.addon }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          # Read addon config
-          if [[ ! -f "${{ matrix.addon }}/config.yaml" ]]; then
-            echo "Config file not found for ${{ matrix.addon }}"
-            exit 1
-          fi
+          build_from=$(yq -r '.args.BUILD_FROM' "$ADDON/build.yaml")
+          build_from=${build_from//\{arch\}/$ARCH}
+          version=$(yq -r '.version' "$ADDON/config.yaml")
 
-          # Extract architecture list
-          arch_list=$(yq eval '.arch[]' "${{ matrix.addon }}/config.yaml" 2>/dev/null || echo "")
+          case "$ARCH" in
+            aarch64) platform=linux/arm64 ;;
+            amd64) platform=linux/amd64 ;;
+          esac
 
-          # Check if this architecture is supported
-          if echo "$arch_list" | grep -q "^${{ matrix.arch }}$"; then
-            echo "supported=true" >> $GITHUB_OUTPUT
-            echo "Architecture ${{ matrix.arch }} is supported for ${{ matrix.addon }}"
-          else
-            echo "supported=false" >> $GITHUB_OUTPUT
-            echo "Architecture ${{ matrix.arch }} is not supported for ${{ matrix.addon }}"
-          fi
+          {
+            echo "build_from=$build_from"
+            echo "platform=$platform"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
 
-          # Get version
-          version=$(yq eval '.version' "${{ matrix.addon }}/config.yaml")
-          echo "version=${version}" >> $GITHUB_OUTPUT
+      - name: Set image owner
+        run: echo "IMAGE_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
-      - name: Get build arguments
-        id: build_args
-        if: steps.info.outputs.supported == 'true'
-        run: |
-          # Default build from
-          build_from="ghcr.io/home-assistant/${{ matrix.arch }}-base:latest"
-
-          # Check for build.yaml and extract build_from if it exists
-          if [[ -f "${{ matrix.addon }}/build.yaml" ]]; then
-            # Use yq to parse the build.yaml file
-            build_from_yaml=$(yq eval ".args.BUILD_FROM" "${{ matrix.addon }}/build.yaml" | sed "s/{arch}/${{ matrix.arch }}/g")
-            if [[ "$build_from_yaml" != "null" ]] && [[ ! -z "$build_from_yaml" ]]; then
-              build_from=$build_from_yaml
-            fi
-          fi
-
-          echo "build_from=${build_from}" >> $GITHUB_OUTPUT
-
-      - name: Set up QEMU
-        if: steps.info.outputs.supported == 'true'
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        if: steps.info.outputs.supported == 'true'
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            image=moby/buildkit:latest
-
-      - name: Set lowercase owner
-        if: steps.info.outputs.supported == 'true'
-        id: lowercase
-        run: echo "OWNER=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        if: steps.info.outputs.supported == 'true' && github.event_name != 'pull_request'
-        run: |
-          if [ -n "${{ secrets.GHCR_PAT }}" ]; then
-            echo "Logging in to GHCR with Personal Access Token"
-            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          else
-            echo "Logging in to GHCR with default GITHUB_TOKEN"
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          fi
+        if: github.event_name != 'pull_request'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Pull base image
-        if: steps.info.outputs.supported == 'true'
-        run: docker pull ghcr.io/home-assistant/${{ matrix.arch }}-base:latest
-
-      - name: Build and push addon
-        if: steps.info.outputs.supported == 'true' && github.event_name != 'pull_request'
-        uses: docker/build-push-action@v5
+      - name: Build add-on
+        uses: docker/build-push-action@v7
         with:
           context: ./${{ matrix.addon }}
           file: ./${{ matrix.addon }}/Dockerfile
-          platforms: linux/${{ matrix.arch }}
-          push: true
+          platforms: ${{ steps.settings.outputs.platform }}
+          push: ${{ github.event_name != 'pull_request' }}
           tags: |
-            ghcr.io/${{ env.OWNER }}/${{ matrix.arch }}-${{ matrix.addon }}-${{ env.SUFFIX }}:${{ steps.info.outputs.version }}
-            ghcr.io/${{ env.OWNER }}/${{ matrix.arch }}-${{ matrix.addon }}-${{ env.SUFFIX }}:latest
-          build-args: |
-            BUILD_FROM=${{ steps.build_args.outputs.build_from }}
-            BUILD_VERSION=${{ steps.info.outputs.version }}
+            ghcr.io/${{ env.IMAGE_OWNER }}/${{ matrix.arch }}-${{ matrix.addon }}-${{ env.IMAGE_SUFFIX }}:${{ steps.settings.outputs.version }}
+            ghcr.io/${{ env.IMAGE_OWNER }}/${{ matrix.arch }}-${{ matrix.addon }}-${{ env.IMAGE_SUFFIX }}:latest
+          build-args: BUILD_FROM=${{ steps.settings.outputs.build_from }}
+          secrets: |
+            node_red_token=${{ secrets.NODE_RED_TOKEN }}
           provenance: false
 
-      - name: Build addon (test mode for PRs)
-        if: steps.info.outputs.supported == 'true' && github.event_name == 'pull_request'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./${{ matrix.addon }}
-          file: ./${{ matrix.addon }}/Dockerfile
-          platforms: linux/${{ matrix.arch }}
-          push: false
-          build-args: |
-            BUILD_FROM=${{ steps.build_args.outputs.build_from }}
-            BUILD_VERSION=${{ steps.info.outputs.version }}
-          provenance: false
+  # The selection job can only skip a build it believes is already published,
+  # and skipped jobs report success. Without this, a run that published nothing
+  # is indistinguishable from a run that published everything.
+  published:
+    name: Declared version is published
+    needs: [changes, build]
+    # Runs even when build was skipped, which is exactly the case it guards.
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Every declared version has an image for every arch
+        env:
+          IMAGE_SUFFIX: ${{ env.IMAGE_SUFFIX }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          ARCHES=(aarch64 amd64)
+          missing=0
+
+          for config in */config.yaml; do
+            addon=${config%%/*}
+            version=$(yq -r '.version' "$config")
+
+            for arch in "${ARCHES[@]}"; do
+              package=$(printf '%s-%s%s' "$arch" "$addon" "${IMAGE_SUFFIX:+-$IMAGE_SUFFIX}")
+
+              # Capture before matching. Piping into `grep -q` under pipefail
+              # reports failure even on a match, because grep exits at the first
+              # hit and gh dies on SIGPIPE.
+              tags=$(gh api --paginate \
+                       "/users/$OWNER/packages/container/$package/versions" \
+                       --jq '.[].metadata.container.tags[]' 2>&1) && status=0 || status=$?
+
+              # "I could not ask" is not "it was never published". Report the
+              # two differently, or a token or outage looks like a failed
+              # release and sends someone hunting the wrong problem.
+              if [ "$status" -ne 0 ] && ! grep -q 'HTTP 404' <<< "$tags"; then
+                echo "::error::could not verify $package:$version against ghcr: $tags"
+                missing=1
+                continue
+              fi
+
+              if [ "$status" -eq 0 ] && grep -Fxq "$version" <<< "$tags"; then
+                echo "$package:$version present"
+              else
+                echo "::error::$package:$version was never published"
+                missing=1
+              fi
+            done
+          done
+
+          exit "$missing"

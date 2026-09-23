@@ -1,0 +1,49 @@
+configuration:
+  geo_enabled:
+    name: "Enable Automated Location Updates"
+    description: "Updates Home Assistant's location, timezone, and elevation based on device_tracker data."
+  geo_device_tracker_primary:
+    name: "Primary Device Tracker"
+    description: "Entity ID of the primary device tracker for location (e.g., device_tracker.phone). Note: The tracker MUST provide GPS coordinates to work."
+  geo_device_tracker_secondary:
+    name: "Secondary Device Tracker (Fallback)"
+    description: "Entity ID of a fallback device tracker used when the primary is unavailable. Note: The tracker MUST provide GPS coordinates to work."
+  geo_update_threshold:
+    name: "Update Threshold (miles)"
+    description: "Minimum distance in miles the RV must move before updating location data. Range: 1-500."
+  microair_enabled:
+    name: "Enable Micro-Air EasyTouch Thermostat Integration"
+    description: "Connects to thermostats via Bluetooth."
+  microair_email:
+    name: "Micro-Air Account Email"
+    description: "Email address used for your Micro-Air EasyTouch account."
+  microair_password:
+    name: "Micro-Air Account Password"
+    description: "Password for your Micro-Air EasyTouch account."
+  hughes_enabled:
+    name: "Enable Hughes Power Watchdog Integration"
+    description: "Connects to supported Hughes Power Watchdog surge protectors via Bluetooth. For setup, keep only your Watchdog nearby."
+  victron_enabled:
+    name: "Enable Victron Energy Integration"
+    description: "Requires a GX device with MQTT enabled."
+  rvc_time_sync_enabled:
+    name: "Enable RV-C Network Time Sync"
+    description: "Periodically broadcasts the current system time to the RV-C network. Helps keep RV devices time-synchronized. Defaults to disabled."
+  confirm_nodered_takeover:
+    name: "Allow Node-RED Overwrite (Initial install config only)"
+    description: "Allows LibreCoach to overwrite your existing Node-RED flows. WARNING: This will delete your current flows!"
+  prevent_flow_updates:
+    name: "Preserve Node-RED Flow Customizations (Referenced at update and restart)"
+    description: "Enable this to PRESERVE your customized flows during app updates. Core files (decoders, etc.) will still be updated, but flows.json will not be touched."
+  debug_logging:
+    name: "Enable Debug Logging"
+    description: "Enables detailed debug logging for troubleshooting."
+  mqtt_user:
+    name: "MQTT User (Advanced)"
+    description: "⚠️ Advanced setting — this normally should not be changed."
+  mqtt_pass:
+    name: "MQTT Password (Advanced)"
+    description: "⚠️ Advanced setting — this normally should not be changed."
+  can_interface:
+    name: "CAN Interface (Advanced)"
+    description: "⚠️ Advanced setting — this normally should not be changed."

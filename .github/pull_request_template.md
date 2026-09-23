@@ -1,59 +1,23 @@
-## Description
+## What changed and why
 
-<!-- Provide a clear and concise description of your changes -->
+<!-- Describe the problem, the outcome, and any non-obvious design choice. -->
 
-## Addon
+## User impact
 
-<!-- Check the addon(s) affected by this PR -->
+<!-- Describe entity, configuration, compatibility, migration, or hardware effects. Write "None" if there are none. -->
 
-- [ ] Bluetooth WiFi Setup
-- [ ] CAN to MQTT Bridge
-- [ ] Repository/General
+## Validation
 
-## Type of Change
+<!-- List exact automated checks and relevant Home Assistant or hardware tests. State anything that was not tested. -->
 
-<!-- Check all that apply -->
+## Dependencies
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to change)
-- [ ] Documentation update
-- [ ] Configuration change
-- [ ] Dependency update
+<!-- Link required companion-repository commits or PRs. For Node-RED-dependent changes, include the published main SHA and the matching node-red.ref update. Write "None" if there are none. -->
 
-## Testing
+## Documentation
 
-<!-- Describe the tests you ran to verify your changes -->
+<!-- Link CHANGELOG.md or DOCS.md updates, or explain why documentation is not needed. -->
 
-- [ ] Tested on actual hardware
-- [ ] Tested configuration changes
-- [ ] Checked addon logs for errors
-- [ ] Verified backward compatibility
+## Related issue
 
-**Test Environment:**
-
-- Home Assistant Version:
-- Hardware:
-- Addon Version:
-
-## Checklist
-
-<!-- Check all that apply -->
-
-- [ ] My code follows the existing code style
-- [ ] I have updated the DOCS.md file (if configuration or usage changed)
-- [ ] I have updated the CHANGELOG.md file
-- [ ] I have updated the README.md (if needed)
-- [ ] My changes generate no new warnings or errors
-- [ ] Any dependent changes have been merged and published
-
-## Related Issues
-
-<!-- Link any related issues -->
-
-Fixes #
-Related to #
-
-## Additional Notes
-
-<!-- Any additional information, context, or screenshots -->
+<!-- For example: Fixes #123 -->
