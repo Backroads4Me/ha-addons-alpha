@@ -12,9 +12,15 @@
 ## Before testing
 
 - Create a full Home Assistant backup.
-- Stop any stable or beta LibreCoach add-on before starting the alpha. The installations can exist
-  side by side, but they manage the same Node-RED installation, CAN interface, and Home Assistant
-  entities and must not run at the same time.
+- Uninstall the LibreCoach version you are leaving before installing another one, whether you
+  are moving to the alpha, back to stable, or between beta and alpha. Stopping it is not enough:
+  every LibreCoach version turns on its own **Start on boot** when it runs, so after the next Home
+  Assistant restart all installed versions start together and fight over the same Node-RED
+  installation, CAN interface, and Home Assistant entities.
+- Your settings carry over. Every fresh install copies the settings saved by the stable add-on,
+  or, if you have never run stable, the ones saved by the last beta or alpha build.
+- Before uninstalling the alpha, finish any test it was installed for, such as exporting a Hughes
+  probe report and pressing **Probe Remove Entities**. Stable and beta cannot remove those entities.
 - Read the [LibreCoach changelog](./librecoach/CHANGELOG.md) for the behavior under test.
 - Expect to provide the alpha version and relevant logs when reporting a problem.
 
@@ -30,7 +36,7 @@ Only add this repository if you intend to test a pre-release build:
 
 You can also add `https://github.com/Backroads4Me/ha-addons-alpha` manually under Home Assistant's
 add-on repositories. Install **LibreCoach** from **ALPHA TESTING: LibreCoach**, review its
-configuration, and then start it while the stable and beta add-ons are stopped.
+configuration, and then start it once the version you are leaving is uninstalled.
 
 ## Report alpha feedback
 
