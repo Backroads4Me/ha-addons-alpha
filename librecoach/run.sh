@@ -43,36 +43,92 @@ run_orchestrator() {
 	# Config persistence across uninstall/reinstall
 	# ========================
 	# Uninstalling an add-on wipes its /data (and options.json); /share survives.
-	# To save users from re-entering credentials, we mirror options to a SINGLE
-	# shared file in /share and restore them on a fresh install. BOTH builds
-	# create and update the preserve directory, so switching channels in either
-	# direction (including a prod user's first beta install) restores the saved
-	# config. The directory also holds Node-RED's persistent context store
-	# (settings.js points the "file" context store here). It lives OUTSIDE
-	# PROJECT_PATH so the rsync --delete deploy below can't remove it.
+	# To save users from re-entering credentials, options are saved to /share and
+	# restored on a fresh install. Production is the reference configuration:
+	# only a release build writes PRESERVE_FILE, and every fresh install, beta and
+	# alpha included, restores from it first. Pre-release builds save to
+	# PRERELEASE_PRESERVE_FILE, which is used only when no production settings
+	# have ever been saved (a tester who never ran production, or a first
+	# production install after testing). The directory also holds Node-RED's
+	# persistent context store (settings.js points the "file" context store
+	# here). It lives OUTSIDE PROJECT_PATH so the rsync --delete deploy below
+	# can't remove it.
 	PRESERVE_DIR="/share/.librecoach-preserve"
 	PRESERVE_FILE="$PRESERVE_DIR/options.json"
+	PRERELEASE_PRESERVE_FILE="$PRESERVE_DIR/options-prerelease.json"
+	OPTIONS_FILE="$DATA_DIR/options.json"
 
-	# Restore: a fresh install has no state file. If the shared file exists, apply
+	# Release versions are plain x.y.z; beta and alpha are x.y.z-<channel>.<n>.
+	# An unreadable version counts as pre-release so it can never overwrite the
+	# production settings.
+	choose_preserve_files() {
+		if [[ "$ADDON_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+			IS_RELEASE_BUILD=true
+			OWN_PRESERVE_FILE="$PRESERVE_FILE"
+		else
+			IS_RELEASE_BUILD=false
+			OWN_PRESERVE_FILE="$PRERELEASE_PRESERVE_FILE"
+		fi
+		RESTORE_FILE="$PRESERVE_FILE"
+		[ -f "$RESTORE_FILE" ] || RESTORE_FILE="$PRERELEASE_PRESERVE_FILE"
+	}
+
+	# Restore: a fresh install has no state file. If saved settings exist, apply
 	# only the keys THIS build's schema already knows about (intersect saved over
 	# the current defaults) — saved values win, unknown beta-only keys are dropped
 	# so the POST is never rejected by a build with a narrower schema, and keys new
 	# to this build keep their defaults. Writing options.json applies the values to
 	# this very boot; the POST persists them for the UI and subsequent boots.
-	if [ ! -f "$STATE_FILE" ] && [ -f "$PRESERVE_FILE" ] && [ -f /data/options.json ]; then
-		if MERGED=$(jq -n \
-				--argjson def "$(cat /data/options.json)" \
-				--argjson saved "$(cat "$PRESERVE_FILE")" \
+	restore_saved_options() {
+		local merged
+		[ ! -f "$STATE_FILE" ] && [ -f "$RESTORE_FILE" ] && [ -f "$OPTIONS_FILE" ] || return 0
+		if merged=$(jq -n \
+				--argjson def "$(cat "$OPTIONS_FILE")" \
+				--argjson saved "$(cat "$RESTORE_FILE")" \
 				'$def * ($saved | with_entries(select(.key as $k | $def | has($k))))' 2>/dev/null) \
-			&& [ -n "$MERGED" ] && [ "$MERGED" != "null" ]; then
-			echo "$MERGED" >/data/options.json
+			&& [ -n "$merged" ] && [ "$merged" != "null" ]; then
+			echo "$merged" >"$OPTIONS_FILE"
 			curl -s --connect-timeout 5 -m 30 -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
-				-d "$(jq -n --argjson o "$MERGED" '{"options":$o}')" "$SUPERVISOR/addons/self/options" >/dev/null
-			bashio::log.info "   Config settings restored from file"
+				-d "$(jq -n --argjson o "$merged" '{"options":$o}')" "$SUPERVISOR/addons/self/options" >/dev/null
+			bashio::log.info "   Config settings restored from ${RESTORE_FILE}"
 		else
 			bashio::log.warning "   Could not merge saved config — continuing with defaults"
 		fi
-	fi
+	}
+
+	# Save this build's current options to /share so they survive a future
+	# uninstall/reinstall (restored at the top of the next fresh install). Called
+	# on every successful boot so the file always reflects the latest changes.
+	# Production saves exactly its own options, so the reference copy never
+	# carries values a beta or alpha build left behind. Pre-release builds MERGE
+	# their options over the pre-release file so beta and alpha do not clobber
+	# keys only the other one knows.
+	save_options() {
+		local filter merged
+		[ -f "$OPTIONS_FILE" ] || return 0
+		mkdir -p "$PRESERVE_DIR"
+		if [ "$IS_RELEASE_BUILD" = "true" ]; then
+			filter='$cur'
+		else
+			filter='$old * $cur'
+		fi
+		if merged=$(jq -n \
+				--argjson old "$(cat "$OWN_PRESERVE_FILE" 2>/dev/null || echo '{}')" \
+				--argjson cur "$(cat "$OPTIONS_FILE")" \
+				"$filter" 2>/dev/null) \
+			&& [ -n "$merged" ] && [ "$merged" != "null" ]; then
+			if echo "$merged" >"$OWN_PRESERVE_FILE.tmp" && mv "$OWN_PRESERVE_FILE.tmp" "$OWN_PRESERVE_FILE"; then
+				chmod 600 "$OWN_PRESERVE_FILE" 2>/dev/null || true
+			else
+				bashio::log.warning "   Could not save config to ${OWN_PRESERVE_FILE}"
+			fi
+		else
+			bashio::log.warning "   Could not merge config for save — leaving ${OWN_PRESERVE_FILE} unchanged"
+		fi
+	}
+
+	choose_preserve_files
+	restore_saved_options
 
 	# Config values used by orchestrator (from config.yaml)
 	MQTT_USER=$(bashio::config 'mqtt_user')
@@ -754,29 +810,9 @@ EOF
 		fi
 	fi
 
-	# Save this build's current options to the shared /share file so they survive a
-	# future uninstall/reinstall (restored at the top of the next fresh install).
-	# Done on every successful boot so the file always reflects the latest changes.
-	# Both builds create the directory and update the file. The save MERGES this
-	# build's options OVER whatever is already saved (rather than overwriting) so
-	# neither build clobbers keys the other build owns. Stored outside PROJECT_PATH
-	# so the rsync --delete deploy below can't remove it.
-	mkdir -p "$PRESERVE_DIR"
-	if [ -f /data/options.json ]; then
-		if MERGED=$(jq -n \
-				--argjson old "$(cat "$PRESERVE_FILE" 2>/dev/null || echo '{}')" \
-				--argjson cur "$(cat /data/options.json)" \
-				'$old * $cur' 2>/dev/null) \
-			&& [ -n "$MERGED" ] && [ "$MERGED" != "null" ]; then
-			if echo "$MERGED" >"$PRESERVE_FILE.tmp" && mv "$PRESERVE_FILE.tmp" "$PRESERVE_FILE"; then
-				chmod 600 "$PRESERVE_FILE" 2>/dev/null || true
-			else
-				bashio::log.warning "   Could not save config to ${PRESERVE_FILE}"
-			fi
-		else
-			bashio::log.warning "   Could not merge config for save — leaving ${PRESERVE_FILE} unchanged"
-		fi
-	fi
+	# PRESERVE_DIR lives outside PROJECT_PATH, so the rsync --delete deploy below
+	# cannot remove the saved options.
+	save_options
 
 	# ========================
 	# Deployment
