@@ -43,16 +43,17 @@ run_orchestrator() {
 	# Config persistence across uninstall/reinstall
 	# ========================
 	# Uninstalling an add-on wipes its /data (and options.json); /share survives.
-	# To save users from re-entering credentials, options are saved to /share and
-	# restored on a fresh install. Production is the reference configuration:
-	# only a release build writes PRESERVE_FILE, and every fresh install, beta and
-	# alpha included, restores from it first. Pre-release builds save to
-	# PRERELEASE_PRESERVE_FILE, which is used only when no production settings
-	# have ever been saved (a tester who never ran production, or a first
-	# production install after testing). The directory also holds Node-RED's
-	# persistent context store (settings.js points the "file" context store
-	# here). It lives OUTSIDE PROJECT_PATH so the rsync --delete deploy below
-	# can't remove it.
+	# To save users from re-entering credentials, options are saved to /share.
+	# Production is independent: it saves exactly its own options to
+	# PRESERVE_FILE and restores only from that file, only on a fresh install.
+	# Beta and alpha save to PRERELEASE_PRESERVE_FILE, and a fresh install of a
+	# pre-release build copies production's saved settings, so testers start
+	# from their production configuration. Settings production does not have
+	# take the last beta/alpha value. Updates restore nothing, so a tester's
+	# changes survive every beta/alpha update. The
+	# directory also holds Node-RED's persistent context store (settings.js
+	# points the "file" context store here). It lives OUTSIDE PROJECT_PATH so
+	# the rsync --delete deploy below can't remove it.
 	PRESERVE_DIR="/share/.librecoach-preserve"
 	PRESERVE_FILE="$PRESERVE_DIR/options.json"
 	PRERELEASE_PRESERVE_FILE="$PRESERVE_DIR/options-prerelease.json"
@@ -69,42 +70,54 @@ run_orchestrator() {
 			IS_RELEASE_BUILD=false
 			OWN_PRESERVE_FILE="$PRERELEASE_PRESERVE_FILE"
 		fi
-		RESTORE_FILE="$PRESERVE_FILE"
-		[ -f "$RESTORE_FILE" ] || RESTORE_FILE="$PRERELEASE_PRESERVE_FILE"
 	}
 
-	# Restore: a fresh install has no state file. If saved settings exist, apply
-	# only the keys THIS build's schema already knows about (intersect saved over
-	# the current defaults) — saved values win, unknown beta-only keys are dropped
-	# so the POST is never rejected by a build with a narrower schema, and keys new
-	# to this build keep their defaults. Writing options.json applies the values to
-	# this very boot; the POST persists them for the UI and subsequent boots.
+	# Restore saved settings into a fresh install (no state file). Production
+	# uses only production's saved settings. Beta and alpha use the last
+	# beta/alpha settings with production's over them. Updates and restarts
+	# restore nothing, so changes made in the add-on UI stick. Only keys THIS
+	# build's schema knows are applied, so the POST is never rejected by a build
+	# with a narrower schema, and keys nobody saved keep their defaults. Writing options.json applies the values to this
+	# very boot; the POST persists them for the UI and subsequent boots.
 	restore_saved_options() {
-		local merged
-		[ ! -f "$STATE_FILE" ] && [ -f "$RESTORE_FILE" ] && [ -f "$OPTIONS_FILE" ] || return 0
-		if merged=$(jq -n \
-				--argjson def "$(cat "$OPTIONS_FILE")" \
-				--argjson saved "$(cat "$RESTORE_FILE")" \
-				'$def * ($saved | with_entries(select(.key as $k | $def | has($k))))' 2>/dev/null) \
-			&& [ -n "$merged" ] && [ "$merged" != "null" ]; then
-			echo "$merged" >"$OPTIONS_FILE"
-			curl -s --connect-timeout 5 -m 30 -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
-				-d "$(jq -n --argjson o "$merged" '{"options":$o}')" "$SUPERVISOR/addons/self/options" >/dev/null
-			bashio::log.info "   Config settings restored from ${RESTORE_FILE}"
+		local current prod prerelease filter merged
+		[ ! -f "$STATE_FILE" ] && [ -f "$OPTIONS_FILE" ] || return 0
+		if [ "$IS_RELEASE_BUILD" = "true" ]; then
+			filter='$cur * ($prod | known)'
 		else
-			bashio::log.warning "   Could not merge saved config — continuing with defaults"
+			filter='$cur * ($pre | known) * ($prod | known)'
 		fi
+		current=$(cat "$OPTIONS_FILE")
+		# A missing or unreadable file counts as empty, so the other still applies.
+		prod=$(jq -c 'objects' "$PRESERVE_FILE" 2>/dev/null) || prod='{}'
+		prerelease=$(jq -c 'objects' "$PRERELEASE_PRESERVE_FILE" 2>/dev/null) || prerelease='{}'
+		[ -n "$prod" ] || prod='{}'
+		[ -n "$prerelease" ] || prerelease='{}'
+		if ! merged=$(jq -n \
+				--argjson cur "$current" \
+				--argjson prod "$prod" \
+				--argjson pre "$prerelease" \
+				"def known: with_entries(select(.key as \$k | \$cur | has(\$k))); $filter" 2>/dev/null) \
+			|| [ -z "$merged" ] || [ "$merged" = "null" ]; then
+			bashio::log.warning "   Could not merge saved config — continuing with current settings"
+			return 0
+		fi
+		[ "$(jq -cS . <<<"$merged")" = "$(jq -cS . <<<"$current")" ] && return 0
+		echo "$merged" >"$OPTIONS_FILE"
+		curl -s --connect-timeout 5 -m 30 -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+			-d "$(jq -n --argjson o "$merged" '{"options":$o}')" "$SUPERVISOR/addons/self/options" >/dev/null
+		bashio::log.info "   Config settings restored from saved settings"
 	}
 
 	# Save this build's current options to /share so they survive a future
 	# uninstall/reinstall (restored at the top of the next fresh install). Called
 	# on every successful boot so the file always reflects the latest changes.
-	# Production saves exactly its own options, so the reference copy never
-	# carries values a beta or alpha build left behind. Pre-release builds MERGE
+	# Production saves exactly its own options, so its copy never carries values
+	# a beta or alpha build left behind. Pre-release builds MERGE
 	# their options over the pre-release file so beta and alpha do not clobber
 	# keys only the other one knows.
 	save_options() {
-		local filter merged
+		local filter old merged
 		[ -f "$OPTIONS_FILE" ] || return 0
 		mkdir -p "$PRESERVE_DIR"
 		if [ "$IS_RELEASE_BUILD" = "true" ]; then
@@ -112,8 +125,11 @@ run_orchestrator() {
 		else
 			filter='$old * $cur'
 		fi
+		# An unreadable saved file counts as empty, so this save repairs it.
+		old=$(jq -c 'objects' "$OWN_PRESERVE_FILE" 2>/dev/null) || old='{}'
+		[ -n "$old" ] || old='{}'
 		if merged=$(jq -n \
-				--argjson old "$(cat "$OWN_PRESERVE_FILE" 2>/dev/null || echo '{}')" \
+				--argjson old "$old" \
 				--argjson cur "$(cat "$OPTIONS_FILE")" \
 				"$filter" 2>/dev/null) \
 			&& [ -n "$merged" ] && [ "$merged" != "null" ]; then

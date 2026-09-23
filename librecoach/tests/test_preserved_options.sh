@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Saved add-on options: production is the reference for every fresh install.
+# Saved add-on options: production is independent, and a fresh beta/alpha
+# install starts from production's settings. Updates restore nothing.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -46,33 +47,45 @@ assert_json() {
 AUTH_HEADER="Authorization: Bearer test"
 SUPERVISOR="http://supervisor"
 
-# One Home Assistant: a shared /share and a fresh /data per install.
+# One Home Assistant: a shared /share, and one /data per installed channel.
 PRESERVE_DIR="$TEST_TMP/share/.librecoach-preserve"
 PRESERVE_FILE="$PRESERVE_DIR/options.json"
 PRERELEASE_PRESERVE_FILE="$PRESERVE_DIR/options-prerelease.json"
-DEFAULTS='{"hughes_enabled":false,"mqtt_pass":"default","debug_logging":false}'
 
-# Start an install of a given version, then run the boot-time restore.
+# Option schemas: production, and a beta that adds a feature production lacks.
+SCHEMA_PROD='{"mqtt_pass":"default","debug_logging":false}'
+SCHEMA_BETA='{"mqtt_pass":"default","debug_logging":false,"tank_enabled":false}'
+
+# Install (fresh) or restart/update (existing) a version, then run the
+# boot-time restore and save. An existing install that gains options on
+# update receives their defaults from the Supervisor, as Home Assistant does.
 boot() {
-	local version=$1 fresh=${2:-fresh}
+	local version=$1 schema=$2 mode=${3:-fresh}
 	ADDON_VERSION=$version
-	DATA_DIR="$TEST_TMP/data-$version"
+	case "$version" in
+	*-beta.*) DATA_DIR="$TEST_TMP/data-beta" ;;
+	*-alpha.*) DATA_DIR="$TEST_TMP/data-alpha" ;;
+	*) DATA_DIR="$TEST_TMP/data-release" ;;
+	esac
 	STATE_FILE="$DATA_DIR/.librecoach-state.json"
 	OPTIONS_FILE="$DATA_DIR/options.json"
-	if [ "$fresh" = "fresh" ]; then
+	if [ "$mode" = "fresh" ]; then
 		rm -rf "$DATA_DIR"
 		mkdir -p "$DATA_DIR"
-		echo "$DEFAULTS" >"$OPTIONS_FILE"
+		echo "$schema" >"$OPTIONS_FILE"
+	else
+		jq -c --argjson s "$schema" '$s * .' "$OPTIONS_FILE" >"$OPTIONS_FILE.new"
+		mv "$OPTIONS_FILE.new" "$OPTIONS_FILE"
 	fi
 	choose_preserve_files
 	restore_saved_options
 	touch "$STATE_FILE"
+	save_options
 }
 
 # The user edits options in the add-on UI and restarts it.
 set_option() {
-	local filter=$1
-	jq -c "$filter" "$OPTIONS_FILE" >"$OPTIONS_FILE.new"
+	jq -c "$1" "$OPTIONS_FILE" >"$OPTIONS_FILE.new"
 	mv "$OPTIONS_FILE.new" "$OPTIONS_FILE"
 	save_options
 }
@@ -88,38 +101,55 @@ for version in 1.7.1-beta.4 1.7.1-alpha.2 "" null; do
 done
 
 # A tester who never ran production keeps settings across beta/alpha installs.
-boot 1.7.1-beta.4
-set_option '.hughes_enabled = true | .mqtt_pass = "beta-pass"'
+boot 1.7.1-beta.6 "$SCHEMA_BETA"
+set_option '.mqtt_pass = "beta-pass" | .tank_enabled = true'
 [ ! -f "$PRESERVE_FILE" ]
-boot 1.7.1-alpha.2
-assert_json "$OPTIONS_FILE" '.hughes_enabled' 'true'
-assert_json "$OPTIONS_FILE" '.mqtt_pass' '"beta-pass"'
+boot 1.7.1-alpha.4 "$SCHEMA_BETA"
+assert_json "$OPTIONS_FILE" '.' '{"mqtt_pass":"beta-pass","debug_logging":false,"tank_enabled":true}'
 
-# A first production install after testing adopts the tester's settings.
-boot 1.7.1
-assert_json "$OPTIONS_FILE" '.mqtt_pass' '"beta-pass"'
-set_option '.mqtt_pass = "prod-pass" | .hughes_enabled = false'
-assert_json "$PRESERVE_FILE" '.' '{"hughes_enabled":false,"mqtt_pass":"prod-pass","debug_logging":false}'
+# Production is independent: its first install never reads beta/alpha settings.
+boot 1.7.1 "$SCHEMA_PROD"
+assert_json "$OPTIONS_FILE" '.' '{"mqtt_pass":"default","debug_logging":false}'
+set_option '.mqtt_pass = "prod-pass"'
+assert_json "$PRESERVE_FILE" '.' '{"mqtt_pass":"prod-pass","debug_logging":false}'
 
-# Once production has saved, every beta and alpha install copies production,
-# even after a pre-release build saved different values more recently.
-boot 1.7.1-alpha.2
-assert_json "$OPTIONS_FILE" '.mqtt_pass' '"prod-pass"'
-set_option '.mqtt_pass = "alpha-pass" | .debug_logging = true'
-boot 1.7.1-beta.4
-assert_json "$OPTIONS_FILE" '.mqtt_pass' '"prod-pass"'
-assert_json "$OPTIONS_FILE" '.debug_logging' 'false'
-assert_json "$PRESERVE_FILE" '.mqtt_pass' '"prod-pass"'
+# A fresh beta/alpha install takes production's value for every setting
+# production has, and the last beta/alpha value for the rest.
+boot 1.7.1-beta.6 "$SCHEMA_BETA"
+assert_json "$OPTIONS_FILE" '.' '{"mqtt_pass":"prod-pass","debug_logging":false,"tank_enabled":true}'
 
-# An existing install is not a fresh install and keeps its own settings.
-boot 1.7.1-alpha.2 existing
-assert_json "$OPTIONS_FILE" '.mqtt_pass' '"alpha-pass"'
+# Beta/alpha updates and restarts keep the tester's changes.
+set_option '.mqtt_pass = "beta-pass-2" | .debug_logging = true'
+boot 1.7.1-beta.7 "$SCHEMA_BETA" existing
+assert_json "$OPTIONS_FILE" '.' '{"mqtt_pass":"beta-pass-2","debug_logging":true,"tank_enabled":true}'
+
+# Beta/alpha saves never touch production's settings.
+assert_json "$PRESERVE_FILE" '.' '{"mqtt_pass":"prod-pass","debug_logging":false}'
+
+# A fresh alpha install still starts from production, not from beta's changes.
+boot 1.7.1-alpha.4 "$SCHEMA_BETA"
+assert_json "$OPTIONS_FILE" '.' '{"mqtt_pass":"prod-pass","debug_logging":false,"tank_enabled":true}'
+
+# Reinstalling production restores production's own settings.
+boot 1.7.1 "$SCHEMA_PROD"
+assert_json "$OPTIONS_FILE" '.' '{"mqtt_pass":"prod-pass","debug_logging":false}'
+
+# Updating production in place changes nothing, even for a setting beta has:
+# the new setting keeps its default.
+boot 1.7.2 "$SCHEMA_BETA" existing
+assert_json "$OPTIONS_FILE" '.' '{"mqtt_pass":"prod-pass","debug_logging":false,"tank_enabled":false}'
 
 # Production saves exactly its own options, dropping keys it does not have.
 jq -c '. + {"beta_only": true}' "$PRESERVE_FILE" >"$PRESERVE_FILE.new"
 mv "$PRESERVE_FILE.new" "$PRESERVE_FILE"
-boot 1.7.1 existing
-save_options
+boot 1.7.2 "$SCHEMA_BETA" existing
 assert_json "$PRESERVE_FILE" 'has("beta_only")' 'false'
+
+# An unreadable saved file is ignored; the other one still restores.
+echo 'not json' >"$PRERELEASE_PRESERVE_FILE"
+boot 1.7.1-beta.6 "$SCHEMA_BETA"
+assert_json "$OPTIONS_FILE" '.mqtt_pass' '"prod-pass"'
+# The next save repairs it.
+assert_json "$PRERELEASE_PRESERVE_FILE" '.mqtt_pass' '"prod-pass"'
 
 echo "preserved options tests passed"
