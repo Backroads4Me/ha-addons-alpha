@@ -113,6 +113,9 @@ class HughesHandler(BleDeviceHandler):
     """Decode Hughes V1/V2 push notifications and encode V2 controls."""
 
     poll_interval = HUGHES_POLL_INTERVAL
+    # A Watchdog goes dark with shore power; reconnect as soon as it advertises
+    # again rather than waiting out the bridge backoff (up to 300 s).
+    reconnect_on_advertisement = True
 
     def __init__(self, address, config):
         self.address = address.lower()

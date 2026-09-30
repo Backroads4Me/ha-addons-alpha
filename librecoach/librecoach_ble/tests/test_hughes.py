@@ -94,6 +94,10 @@ def v2_packet(message_type, payload=b""):
     )
 
 
+def test_watchdog_reconnects_as_soon_as_it_advertises():
+    assert HughesHandler.reconnect_on_advertisement is True
+
+
 def test_name_matching_covers_v1_v2_and_boosters():
     assert HughesHandler.match_name("PMD123")
     assert HughesHandler.match_name("WD_V5_123")

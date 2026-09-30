@@ -50,10 +50,10 @@ run_orchestrator() {
 	# pre-release build copies production's saved settings, so testers start
 	# from their production configuration. Settings production does not have
 	# take the last beta/alpha value. Updates restore nothing, so a tester's
-	# changes survive every beta/alpha update. The
-	# directory also holds Node-RED's persistent context store (settings.js
-	# points the "file" context store here). It lives OUTSIDE PROJECT_PATH so
-	# the rsync --delete deploy below can't remove it.
+	# changes survive every beta/alpha update. The directory also holds
+	# Node-RED's persistent context store (settings.js points the "file"
+	# context store here). It lives OUTSIDE PROJECT_PATH so the rsync --delete
+	# deploy below can't remove it.
 	PRESERVE_DIR="/share/.librecoach-preserve"
 	PRESERVE_FILE="$PRESERVE_DIR/options.json"
 	PRERELEASE_PRESERVE_FILE="$PRESERVE_DIR/options-prerelease.json"
@@ -77,8 +77,9 @@ run_orchestrator() {
 	# beta/alpha settings with production's over them. Updates and restarts
 	# restore nothing, so changes made in the add-on UI stick. Only keys THIS
 	# build's schema knows are applied, so the POST is never rejected by a build
-	# with a narrower schema, and keys nobody saved keep their defaults. Writing options.json applies the values to this
-	# very boot; the POST persists them for the UI and subsequent boots.
+	# with a narrower schema, and keys nobody saved keep their defaults. Writing
+	# options.json applies the values to this very boot; the POST persists them
+	# for the UI and subsequent boots.
 	restore_saved_options() {
 		local current prod prerelease filter merged
 		[ ! -f "$STATE_FILE" ] && [ -f "$OPTIONS_FILE" ] || return 0
@@ -113,9 +114,9 @@ run_orchestrator() {
 	# uninstall/reinstall (restored at the top of the next fresh install). Called
 	# on every successful boot so the file always reflects the latest changes.
 	# Production saves exactly its own options, so its copy never carries values
-	# a beta or alpha build left behind. Pre-release builds MERGE
-	# their options over the pre-release file so beta and alpha do not clobber
-	# keys only the other one knows.
+	# a beta or alpha build left behind. Pre-release builds MERGE their options
+	# over the pre-release file so beta and alpha do not clobber keys only the
+	# other one knows.
 	save_options() {
 		local filter old merged
 		[ -f "$OPTIONS_FILE" ] || return 0
