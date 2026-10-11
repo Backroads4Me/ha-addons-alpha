@@ -165,7 +165,7 @@ def test_v2_30a_frame_and_state_message():
     assert state["voltage_l1"] == 121.4
     assert state["energy_l1"] == 142.3
     assert state["error_code_l1"] == 0
-    assert "relay_status" not in state
+    assert state["relay_status"] is True
     assert state["neutral_monitoring"] is True
     assert state["neutral_problem"] is False
     assert state["output_voltage"] is None
@@ -173,6 +173,59 @@ def test_v2_30a_frame_and_state_message():
     message = handler.state_messages(state)[0]
     assert message.topic == "librecoach/ble/hughes/aa:bb/state"
     assert json.loads(message.payload)["power_l1"] == 1735.0
+
+
+def test_v2_30a_frame_reports_relay_open():
+    handler = HughesHandler("AA:BB", {"_device_name": "WD_V7_123"})
+    for relay in (1, 2):
+        state = handler.parse_status(
+            v2_frame(v2_block(121.4, 0.0, 0.0, 142.3, relay=relay))
+        )
+        assert state["relay_status"] is False
+
+
+def test_v2_50a_frame_reports_relay_from_open_bit():
+    handler = HughesHandler("AA:BB", {"_device_name": "WD_E6_123"})
+    closed = handler.parse_status(v2_frame(
+        v2_block(121.4, 14.3, 1735.0, 100.0, relay=0x00),
+        v2_block(120.2, 8.1, 973.6, 42.3, relay=0x01),
+    ))
+    opened = handler.parse_status(v2_frame(
+        v2_block(121.4, 0.0, 0.0, 100.0, relay=0x10),
+        v2_block(120.2, 0.0, 0.0, 42.3, relay=0x11),
+    ))
+
+    assert closed["relay_status"] is True
+    assert opened["relay_status"] is False
+
+
+# Frames captured from a WD_E7 on 50A shore power, before and after the relay
+# was opened with command 0x0B payload 0x02.
+E7_RELAY_CLOSED = bytes.fromhex(
+    "2479774001130100440012db79000015c100053ad7003c8a0c000001f2002f85f7"
+    "020000000000177200000013"
+    "11a0000004b60000d89e007d50780000016f0020d5f302000000000017720001"
+    "7121"
+)
+E7_RELAY_OPEN = bytes.fromhex(
+    "2479774001190100440012dcd5000000c1000000e9003c8a0c00000009002f85f7"
+    "02000000000017720010001"
+    "30f710000007400000000007d5078000000000020d5f302000000000017720011"
+    "7121"
+)
+
+
+def test_e7_frames_decode_relay_state():
+    handler = HughesHandler("AA:BB", {"_device_name": "WD_E7_123"})
+
+    closed = handler.parse_status(E7_RELAY_CLOSED)
+    opened = handler.parse_status(E7_RELAY_OPEN)
+
+    assert closed["is_50a"] is True
+    assert closed["relay_status"] is True
+    assert opened["relay_status"] is False
+    assert opened["current_l1"] < 0.1
+    assert opened["neutral_monitoring"] is True
 
 
 def test_v2_50a_frame_decodes_line_two():
@@ -230,7 +283,7 @@ def test_captured_e5_frame_decodes_power_factor_and_neutral_monitoring():
     ) < 0.001
     assert state["neutral_monitoring"] is True
     assert state["neutral_problem"] is False
-    assert "relay_status" not in state
+    assert state["relay_status"] is True
 
 
 def test_line_sums_carry_no_float_tail():

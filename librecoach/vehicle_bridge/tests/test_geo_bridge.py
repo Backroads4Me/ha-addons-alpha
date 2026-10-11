@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -81,3 +82,44 @@ def test_start_attempts_one_forced_update_when_coordinates_exist(monkeypatch):
     run(scenario())
 
     assert updates == [(42.0, -76.0, 300.0, "device_tracker.test", True)]
+
+
+def test_poll_republishes_online_after_unavailable_without_movement(monkeypatch):
+    bridge = make_bridge(monkeypatch)
+    # Startup fix, then an HA restart (tracker unreachable), then the same fix.
+    fixes = iter([
+        (42.0, -76.0, 300.0, "device_tracker.test"),
+        None,
+        (42.0, -76.0, 300.0, "device_tracker.test"),
+    ])
+
+    async def fetch_coordinates():
+        return next(fixes)
+
+    async def ws_update_config(_config):
+        return None
+
+    polls = 0
+
+    async def sleep(_delay):
+        nonlocal polls
+        polls += 1
+        if polls > 2:
+            bridge._stopping = True
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(bridge, "_fetch_coordinates", fetch_coordinates)
+    monkeypatch.setattr(bridge, "_ws_update_config", ws_update_config)
+    monkeypatch.setattr("geo_bridge.asyncio.sleep", sleep)
+
+    async def scenario():
+        await bridge.start()
+        try:
+            await bridge._poll_task
+        except asyncio.CancelledError:
+            pass
+
+    run(scenario())
+
+    statuses = [json.loads(payload)["status"] for _topic, payload, _retain in bridge.mqtt.published]
+    assert statuses == ["online", "unavailable", "online"]

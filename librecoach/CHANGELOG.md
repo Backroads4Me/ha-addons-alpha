@@ -1,3 +1,18 @@
+### 1.7.4
+
+🛠️ Improvements
+
+- The Location sensors recover on their own after Home Assistant restarts, instead of staying unavailable until the coach moves or the app restarts
+- The Location sensors keep their last known city, state, timezone and elevation while the location source is unavailable
+- The Hughes Shore Power Relay switch shows when the relay has been switched off on 50A Gen 2 Watchdogs. It does not show the relay open during the Watchdog's startup delay.
+
+### 1.7.3 (Oct 8, 2026)
+
+🛠️ Improvements
+
+- Micro-Air thermostats report each zone's current HVAC action: cooling, heating, drying, fan, idle or off
+- The Hughes Shore Power Relay switch shows the relay's actual state on 30A Gen 2 Watchdogs. On 50A Watchdogs, which do not report relay state, it shows the last command sent.
+
 ### 1.7.2 (Sep 24, 2026)
 
 🛠️ Improvements

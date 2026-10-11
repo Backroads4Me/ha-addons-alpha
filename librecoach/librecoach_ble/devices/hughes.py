@@ -33,6 +33,7 @@ V2_SET_OPEN = 0x0B
 V2_NEUTRAL_DETECTION = 0x0D
 V2_RELAY_ON = 0x01
 V2_RELAY_OFF = 0x02
+V2_RELAY_OPEN_BIT = 0x10
 V2_NEUTRAL_ENABLE = 0x00
 V2_NEUTRAL_DISABLE = 0x01
 
@@ -71,6 +72,7 @@ IMMEDIATE_PUBLISH_FIELDS = (
     "error_code_l2",
     "neutral_monitoring",
     "neutral_problem",
+    "relay_status",
     "backlight",
     "boost_mode",
     "error_history",
@@ -411,15 +413,23 @@ class HughesHandler(BleDeviceHandler):
         self._line_1 = self._parse_v2_line(raw, 9)
         self._line_2 = self._parse_v2_line(raw, 43) if payload_length == 68 else None
         state = self._build_state("V2")
-        # Byte 33 of each line block is not relay state: a startup-delay capture
-        # showed it fixed at 0 for L1 and 1 for L2 while the relay opened and
-        # closed. Gen2 telemetry carries no relay state, so none is reported.
         state.update({
             "backlight": raw[33],
             "output_voltage": None,
             "temperature": None,
             "boost_mode": None,
         })
+        # Block offset 33 carries relay state in both frame sizes. A 30A frame
+        # reports 0x00 when closed and 0x01 or 0x02 when open or tripped. A 50A
+        # frame ORs the line id (L1 0, L2 1) into the low bit, and a WD_E7 set
+        # bit 0x10 in the first frame after an 0x0B off command. The startup
+        # delay does not set it: a WD_E5 read 0x00/0x01 throughout its delay
+        # with the relay open. On 50A a clear bit means no commanded open, not
+        # a confirmed closed contactor.
+        if payload_length == 34:
+            state["relay_status"] = raw[42] == 0
+        else:
+            state["relay_status"] = raw[42] & V2_RELAY_OPEN_BIT == 0
         if self.has_booster:
             state.update({
                 "output_voltage": struct.unpack(">I", raw[29:33])[0] / 10000,

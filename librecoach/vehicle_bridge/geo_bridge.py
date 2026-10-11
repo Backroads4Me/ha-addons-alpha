@@ -44,6 +44,8 @@ class GeoBridge:
         self._last_lon = None
         self._poll_task = None
         self._stopping = False
+        # True while the last status published to MQTT_TOPIC is "online".
+        self._online = False
 
     def is_enabled(self):
         return bool(self.config.get("geo_enabled")) and bool(self._primary)
@@ -84,6 +86,7 @@ class GeoBridge:
                 await self._poll_task
             except asyncio.CancelledError:
                 pass
+        self._online = False
         self.mqtt.publish(MQTT_TOPIC, json.dumps({"status": "offline"}), retain=True)
 
     # ------------------------------------------------------------------
@@ -96,6 +99,7 @@ class GeoBridge:
                 await asyncio.sleep(POLL_INTERVAL)
                 coords = await self._fetch_coordinates()
                 if coords is None:
+                    self._online = False
                     self.mqtt.publish(
                         MQTT_TOPIC,
                         json.dumps({"status": "unavailable"}),
@@ -103,7 +107,11 @@ class GeoBridge:
                     )
                     continue
                 lat, lon, elev, tracker_id = coords
-                await self._check_and_update(lat, lon, elev, tracker_id)
+                # After "unavailable" (e.g. during an HA restart) the coach has
+                # usually not moved, so force the update to republish "online".
+                await self._check_and_update(
+                    lat, lon, elev, tracker_id, force=not self._online
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -243,6 +251,7 @@ class GeoBridge:
             "distance_moved": round(distance_moved, 1),
         }
         self.mqtt.publish(MQTT_TOPIC, json.dumps(payload), retain=True)
+        self._online = True
         return True
 
     # ------------------------------------------------------------------
